@@ -13,7 +13,7 @@
        print('sha256-' + base64.b64encode(hashlib.sha256(m.group(1)).digest()).decode())" -->
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
-  script-src 'self' 'sha256-v3D4P2JpPU6wzd7TjY8nygY1uiIbm4ZgNup1SCpDWrQ=' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net;
+  script-src 'self' 'sha256-kocM0jXal3vg0fweXQR4mKGXvFEfWLkeID+884Kjdbo=' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net;
   worker-src 'self' blob:;
   connect-src 'self' https://cdn.jsdelivr.net https://storage.googleapis.com;
   img-src 'self' data: blob:;
@@ -125,13 +125,14 @@
     <option value="color">Color</option>
   </select></label>
   <label>Chars
+    <select id="rampPreset">
+      <option value="default">Default</option>
+      <option value="blocks">Blocks</option>
+      <option value="circles">Circles</option>
+      <option value="braille">Braille</option>
+      <option value="custom">Custom</option>
+    </select>
     <input type="text" id="rampInput" value=" .:-=+*#%@" spellcheck="false" autocomplete="off" title="Characters used dark to dense, left to right">
-    <button id="rampResetBtn" class="icon-btn" title="Reset characters to default" aria-label="Reset characters to default">
-      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M3 12a9 9 0 1 1 3 6.7"/>
-        <path d="M3 17v-5h5"/>
-      </svg>
-    </button>
   </label>
   <button id="webcamToggle">Start Webcam</button>
   <label id="bgRemoveLabel" class="disabled">
@@ -171,7 +172,12 @@
         crossorigin="anonymous"></script>
 <script>
 (function(){
-  let RAMP = " .:-=+*#%@"; // dark -> dense; user-customizable via #rampInput
+  // Array.from (not a plain string) so multi-code-unit characters -- like
+  // emoji someone might type into the Chars field, which are UTF-16
+  // surrogate pairs -- count and index as one glyph each, instead of
+  // RAMP[i] occasionally landing on a lone surrogate half and rendering a
+  // broken glyph.
+  let RAMP = Array.from(" .:-=+*#%@"); // dark -> dense; user-customizable via #rampInput
 let RENDER_W = 120, RENDER_H = 90;
 let paused = false;
 let mirrorEnabled = true; // webcam mode only; ignored for the cube source
@@ -279,33 +285,78 @@ function fitToScreen(){
 window.addEventListener('resize', fitToScreen);
 fitToScreen();
 
+// Mono mode's fast path renders via a native <pre> (real DOM text layout,
+// cheaper than per-character canvas fillText -- see the Limitations section
+// of the README). That only stays visually aligned if every character in
+// the active ramp shares one true monospace advance width. Plain ASCII does
+// in Courier New; symbols like the circles/braille presets generally aren't
+// in that font at all, so the browser silently substitutes a fallback font
+// per glyph with its own (different) width, and the grid drifts out of
+// alignment line by line. Canvas rendering doesn't have this problem --
+// fillText() draws each character at a fixed x*CELL_W position regardless
+// of that glyph's own width -- so whenever the ramp isn't ASCII-safe, mono
+// mode falls back to it too instead of staying on the native-text path.
+function isAsciiSafeRamp(){
+  return RAMP.every(ch => ch.codePointAt(0) < 128);
+}
 function setDisplayMode(mode){
-  const isMono = mode === 'mono';
-  asciiEl.style.display = isMono ? '' : 'none';
-  asciiCanvas.style.display = isMono ? 'none' : 'block';
+  const useNativeText = mode === 'mono' && isAsciiSafeRamp();
+  asciiEl.style.display = useNativeText ? '' : 'none';
+  asciiCanvas.style.display = useNativeText ? 'none' : 'block';
 }
 setDisplayMode(colorModeSelect.value);
 colorModeSelect.addEventListener('change', () => setDisplayMode(colorModeSelect.value));
 
-const DEFAULT_RAMP = RAMP;
+// Preset ramps live alongside the free-text field rather than replacing it:
+// picking one just fills the field with that string (so it's fully visible
+// and still editable), and typing something that doesn't match any preset
+// flips the dropdown to "Custom" so it never shows a stale preset name for
+// text the person has since changed. No emoji preset -- every character
+// here shares one fixed 8px monospace cell (CELL_W is measured once off a
+// plain 'M' glyph and reused for the whole grid), and color/proportional
+// emoji glyphs don't downscale cleanly to that: they render wider than
+// their cell and collide with neighbors, and are markedly slower for the
+// canvas to draw per-frame. Blocks/braille/circles are plain single-width
+// text symbols (Emoji_Presentation=No -- rendered as ordinary monochrome
+// glyphs, not substituted with a color emoji font), so none of that
+// applies to them. A person can still type actual emoji into the field
+// themselves if they want that look and don't mind the tradeoff.
+const RAMP_PRESETS = {
+  default: " .:-=+*#%@",
+  blocks: " ░▒▓█",
+  circles: " ○◔◑◕●",
+  braille: " ⠁⠃⠇⠏⠟⠿⣿"
+};
+const rampPreset = document.getElementById('rampPreset');
 const rampInput = document.getElementById('rampInput');
-const rampResetBtn = document.getElementById('rampResetBtn');
+
 // Any non-empty string works as a ramp -- RAMP.length-1 stays >= 0 as long
 // as there's at least one character, so a single-char ramp (every cell the
 // same glyph) is valid too, just visually uninteresting. An empty field is
 // the only thing rejected, since it'd divide by zero below; the last valid
 // ramp just stays in effect until the person types something again.
-rampInput.addEventListener('input', () => {
-  if (rampInput.value.length === 0) return;
+function applyRamp(str){
+  if (str.length === 0) return;
   // Space is always the darkest (index 0) character, regardless of what the
   // person typed, so black areas render as blank instead of a solid glyph.
   // Prepended rather than shown in the field itself, so it doesn't fight
   // with what they're typing or move their cursor mid-edit.
-  RAMP = rampInput.value.startsWith(' ') ? rampInput.value : ' ' + rampInput.value;
+  RAMP = Array.from(str.startsWith(' ') ? str : ' ' + str);
+}
+
+rampPreset.addEventListener('change', () => {
+  if (rampPreset.value === 'custom') return; // no string of its own to apply
+  const preset = RAMP_PRESETS[rampPreset.value];
+  rampInput.value = preset;
+  applyRamp(preset);
+  setDisplayMode(colorModeSelect.value);
 });
-rampResetBtn.addEventListener('click', () => {
-  RAMP = DEFAULT_RAMP;
-  rampInput.value = DEFAULT_RAMP;
+
+rampInput.addEventListener('input', () => {
+  applyRamp(rampInput.value);
+  const matchedPreset = Object.keys(RAMP_PRESETS).find(key => RAMP_PRESETS[key] === rampInput.value);
+  rampPreset.value = matchedPreset || 'custom';
+  setDisplayMode(colorModeSelect.value);
 });
 
 function resizeRenderTarget(cols){

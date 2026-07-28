@@ -32,7 +32,7 @@ Everything happens locally in your browser. The webcam feed, the segmentation ma
 
 **Color.** Select between rendering modes. `mono` is plain white on black text and is the fastest, using native text layout. `grey` tints each character by its sampled luminance. `color` tints each character with the actual sampled pixel color.
 
-**Chars.** The density ramp used to map brightness to characters, darkest to densest, left to right (default: `` .:-=+*#%@``). Type any string here — your name, emoji, whatever — to remap the whole render onto it. A space is always the darkest character, prepended automatically if you don't type one, so black areas stay blank instead of filling in with a visible glyph. The reset icon restores the default ramp.
+**Chars.** The density ramp used to map brightness to characters, darkest to densest, left to right (default: `` .:-=+*#%@``). Pick a built-in preset (Default, Blocks, Circles, Braille) or just type into the field — your name or anything else — to remap the whole render onto it. Picking a preset fills the field with it, and editing the field away from a known preset flips the dropdown to "Custom". A space is always the darkest character, prepended automatically if you don't type one, so black areas stay blank instead of filling in with a visible glyph. No emoji preset is bundled: every character shares one fixed monospace cell, and color/proportional emoji glyphs don't downscale cleanly to that — they render wider than their cell and collide with neighbors, and are markedly slower to draw. The bundled presets use plain text-style Unicode symbols instead (not emoji-presentation characters), which don't have that problem. You can still type actual emoji into the field yourself if you don't mind the tradeoff.
 
 **Webcam.** Toggle to switch the render source from the spinning cube to your live camera feed.
 
@@ -48,7 +48,7 @@ Everything happens locally in your browser. The webcam feed, the segmentation ma
 
 ## Tech
 
-Everything lives in `index.html`. three.js (loaded from a CDN) renders the 3D scene; a 2D canvas samples pixels from either that render or the live `<video>` feed. Mono mode writes the result as a `<pre>` of plain text, the cheapest option since it creates no per character DOM nodes. Grey and color modes draw directly onto a visible `<canvas>` with `fillText()` per character, sized for the display's actual pixel density to stay crisp.
+Everything lives in `index.html`. three.js (loaded from a CDN) renders the 3D scene; a 2D canvas samples pixels from either that render or the live `<video>` feed. Mono mode writes the result as a `<pre>` of plain text when the active character ramp is plain ASCII, the cheapest option since it creates no per character DOM nodes and relies on the font's own monospace metrics. Grey and color modes always draw directly onto a visible `<canvas>` with `fillText()` per character, sized for the display's actual pixel density to stay crisp — and mono falls back to the same canvas path whenever the ramp contains non-ASCII characters (as with the Circles or Braille presets), since those aren't guaranteed to share Courier New's advance width and a native `<pre>` would drift out of alignment line by line once the browser substitutes a fallback font per glyph.
 
 Background removal uses [MediaPipe Tasks Vision](https://ai.google.dev/edge/mediapipe/solutions/vision/image_segmenter), a real ML dependency and not hand rolled like the rest of this, for per frame person segmentation. The raw mask is noisy frame to frame, so it's stabilized with temporal smoothing (an exponential moving average), hysteresis (separate thresholds for a cell turning "on" versus staying "on"), and a spatial despeckle pass (a 3x3 majority filter) before being used.
 
@@ -71,4 +71,3 @@ Things planned but not yet built:
 * Revisiting color mode's performance ceiling with a real shared glyph atlas (one packed canvas, drawn via source rectangles) rather than one `fillText()` call per character; an earlier attempt at a naive per glyph cache made things slower, not faster, so this needs to be done properly or not at all.
 * General mobile and small screen responsiveness, including making the control panel and text bigger on small screens.
 * Further performance fixes and smoothing.
-* Different character maps (for example, emoji).
