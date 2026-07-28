@@ -52,6 +52,8 @@ Background removal uses [MediaPipe Tasks Vision](https://ai.google.dev/edge/medi
 
 Webcam luminance is also smoothed per cell, a separate exponential moving average from the mask smoothing above, to cancel out ordinary camera sensor noise. Without it, individual characters flicker between adjacent ramp values every frame even when the camera is pointed at something completely static.
 
+The sample grid is fixed 4:3, but most webcams are 16:9. Rather than stretch the raw frame to fit, the webcam feed is center-cropped to 4:3 before sampling (the same idea as CSS `object-fit: cover`). The segmentation mask is computed from the uncropped raw frame, so that same crop window is reused when sampling the mask, keeping it in registration with the cropped color image instead of drifting out of alignment.
+
 ## Limitations
 
 No `.obj` or 3D model support yet.
@@ -63,7 +65,6 @@ Color mode is capped by real per character canvas draw cost. Very high resolutio
 Things planned but not yet built:
 
 * `.obj` model upload, parsed from scratch, rendered through the same ASCII pipeline as text and webcam.
-* Fixing the render target's forced 4:3 aspect against most webcams' native 16:9, which currently means some stretching or letterboxing on the sampled feed.
 * A camera selection control for anyone with more than one available device.
 * Revisiting color mode's performance ceiling with a real shared glyph atlas (one packed canvas, drawn via source rectangles) rather than one `fillText()` call per character; an earlier attempt at a naive per glyph cache made things slower, not faster, so this needs to be done properly or not at all.
 * General mobile and small screen responsiveness, including making the control panel and text bigger on small screens.

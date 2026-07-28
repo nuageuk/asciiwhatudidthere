@@ -13,7 +13,7 @@
        print('sha256-' + base64.b64encode(hashlib.sha256(m.group(1)).digest()).decode())" -->
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
-  script-src 'self' 'sha256-eq7OeaPwaKY7m+hBams97tcoewj++tZKR319CyKPSJU=' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net;
+  script-src 'self' 'sha256-vhLwLtPTwj/5yCkape+8K2xJTsOiIgnY03QgkMTlf7c=' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net;
   worker-src 'self' blob:;
   connect-src 'self' https://cdn.jsdelivr.net https://storage.googleapis.com;
   img-src 'self' data: blob:;
@@ -156,6 +156,15 @@
 let RENDER_W = 120, RENDER_H = 90;
 let paused = false;
 let mirrorEnabled = true; // webcam mode only; ignored for the cube source
+// Normalized (0..1) crop rect within the webcam's *raw* frame that maps onto
+// the RENDER_W x RENDER_H (4:3) sample grid -- see cropWebcamFrame(). Stays
+// at the full-frame identity (0,0,1,1) for the cube source, which is already
+// rendered at exactly 4:3 so it needs no cropping. Recomputed every frame
+// webcam is active (cheap, and robust to the user swapping to a
+// different-aspect camera mid-session); updateBackgroundMask() reads it too,
+// so the segmentation mask (sampled from the same *raw* frame) stays aligned
+// with the cropped color image instead of drifting out of registration.
+let cropXNorm = 0, cropYNorm = 0, cropWNorm = 1, cropHNorm = 1;
 // Plain-text snapshot of whatever's currently on screen, kept up to date every
 // frame in ALL color modes (not just mono) so the Copy button always has
 // something sensible to grab, and so a screenshot taken mid-pause matches it.
@@ -497,9 +506,14 @@ function updateBackgroundMask(){
     for(let x = 0; x < RENDER_W; x++){
       // Sample position in mask space, using pixel-center convention so
       // cell centers map to mask-pixel centers instead of being off by
-      // half a pixel.
-      const fx = (x + 0.5) / RENDER_W * latestMaskW - 0.5;
-      const fy = (y + 0.5) / RENDER_H * latestMaskH - 0.5;
+      // half a pixel. Cell (x,y) first maps into the crop window (see
+      // renderToAscii's cropXNorm/cropYNorm/cropWNorm/cropHNorm), then into
+      // full-frame normalized coords, since the mask itself was computed
+      // from the *uncropped* raw frame.
+      const fullNormX = cropXNorm + (x + 0.5) / RENDER_W * cropWNorm;
+      const fullNormY = cropYNorm + (y + 0.5) / RENDER_H * cropHNorm;
+      const fx = fullNormX * latestMaskW - 0.5;
+      const fy = fullNormY * latestMaskH - 0.5;
       const x0 = Math.floor(fx), y0 = Math.floor(fy);
       const tx = fx - x0, ty = fy - y0;
       const x0c = Math.min(latestMaskW - 1, Math.max(0, x0));
@@ -587,18 +601,50 @@ function renderToAscii(){
   // copy either the WebGL canvas or the webcam feed into a normal 2D canvas
   // so we can read its pixels; destination size always forces it to fill
   // the RENDER_W x RENDER_H sample grid regardless of the source's own size.
-  const source = webcamActive ? webcamVideo : renderer.domElement;
   if (bgRemoveActive && segmenter) runSegmentation();
   if (bgRemoveActive) {
     __diagRenderFrames++;
     __diagLogIfDue();
+  }
+  if (webcamActive) {
+    const vw = webcamVideo.videoWidth, vh = webcamVideo.videoHeight;
+    if (vw && vh) {
+      // Most webcams are 16:9; the sample grid is fixed 4:3. Drawing the raw
+      // frame straight into a 4:3 box would squash/stretch it, so instead we
+      // center-crop the raw frame down to a 4:3 slice before sampling --
+      // same idea as CSS object-fit: cover. cropXNorm/cropYNorm/cropWNorm/
+      // cropHNorm record that slice (normalized 0..1) so updateBackgroundMask()
+      // can sample the segmentation mask -- which is computed from the same
+      // *uncropped* raw frame -- through the identical window.
+      const targetAspect = RENDER_W / RENDER_H;
+      const srcAspect = vw / vh;
+      let sx = 0, sy = 0, sw = vw, sh = vh;
+      if (srcAspect > targetAspect) {
+        sw = vh * targetAspect;      // raw frame is wider than target -> crop the sides
+        sx = (vw - sw) / 2;
+      } else if (srcAspect < targetAspect) {
+        sh = vw / targetAspect;      // raw frame is taller than target -> crop top/bottom
+        sy = (vh - sh) / 2;
+      }
+      cropXNorm = sx / vw; cropYNorm = sy / vh;
+      cropWNorm = sw / vw; cropHNorm = sh / vh;
+      sctx.drawImage(webcamVideo, sx, sy, sw, sh, 0, 0, RENDER_W, RENDER_H);
+    } else {
+      // videoWidth/videoHeight aren't populated until the stream's first
+      // frame arrives; fall back to a plain stretch-fit for these first
+      // couple of frames rather than crashing on a divide-by-zero.
+      cropXNorm = 0; cropYNorm = 0; cropWNorm = 1; cropHNorm = 1;
+      sctx.drawImage(webcamVideo, 0, 0, RENDER_W, RENDER_H);
+    }
+  } else {
+    cropXNorm = 0; cropYNorm = 0; cropWNorm = 1; cropHNorm = 1;
+    sctx.drawImage(renderer.domElement, 0, 0, RENDER_W, RENDER_H);
   }
   updateBackgroundMask();
   if (__debugMaskOverlay && bgRemoveActive && latestMask) {
     __drawMaskDebugOverlay();
     return;
   }
-  sctx.drawImage(source, 0, 0, RENDER_W, RENDER_H);
   const img = sctx.getImageData(0, 0, RENDER_W, RENDER_H).data;
   const mode = colorModeSelect.value;
 
