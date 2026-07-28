@@ -13,7 +13,7 @@
        print('sha256-' + base64.b64encode(hashlib.sha256(m.group(1)).digest()).decode())" -->
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
-  script-src 'self' 'sha256-XWBzZbQvva4oEJsovLSAYog909HkrBC1mZ96PosHS2o=' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net;
+  script-src 'self' 'sha256-niaFTKpF+wXLd5myPp7XM3bMfn6O1M5aFeisHzfTr7M=' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net;
   worker-src 'self' blob:;
   connect-src 'self' https://cdn.jsdelivr.net https://storage.googleapis.com;
   img-src 'self' data: blob:;
@@ -91,7 +91,7 @@
   #panel label.disabled {
     opacity: 0.5;
   }
-  #toolRow {
+  #toolRow, #shapeRow {
     display: flex;
     gap: 8px;
   }
@@ -157,6 +157,35 @@
     </select>
     <input type="text" id="rampInput" value=" .:-=+*#%@" spellcheck="false" autocomplete="off" title="Characters used dark to dense, left to right">
   </label>
+  <span>Shape</span>
+  <div id="shapeRow">
+    <button id="shapeCube" class="icon-btn" title="Cube" aria-label="Cube" aria-pressed="true">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 8v8a1 1 0 0 1-.5.87l-8 4.6a1 1 0 0 1-1 0l-8-4.6A1 1 0 0 1 3 16V8a1 1 0 0 1 .5-.87l8-4.6a1 1 0 0 1 1 0l8 4.6A1 1 0 0 1 21 8z"/>
+        <path d="M3.3 7l8.7 5 8.7-5"/>
+        <path d="M12 22V12"/>
+      </svg>
+    </button>
+    <button id="shapeSphere" class="icon-btn" title="Sphere" aria-label="Sphere" aria-pressed="false">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="9"/>
+        <ellipse cx="12" cy="12" rx="9" ry="3.5"/>
+        <path d="M12 3v18"/>
+      </svg>
+    </button>
+    <button id="shapeCone" class="icon-btn" title="Cone" aria-label="Cone" aria-pressed="false">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3l7 16H5z"/>
+        <ellipse cx="12" cy="19" rx="7" ry="2"/>
+      </svg>
+    </button>
+    <button id="shapePyramid" class="icon-btn" title="Pyramid" aria-label="Pyramid" aria-pressed="false">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3l9 16H3z"/>
+        <path d="M12 3l-3 16M12 3l3 16"/>
+      </svg>
+    </button>
+  </div>
   <button id="webcamToggle">Start Webcam</button>
   <label id="bgRemoveLabel" class="disabled">
     <input type="checkbox" id="bgRemoveToggle" disabled>
@@ -205,10 +234,10 @@
   let RAMP = Array.from(" .:-=+*#%@"); // dark -> dense; user-customizable via #rampInput
 let RENDER_W = 120, RENDER_H = 90;
 let paused = false;
-let mirrorEnabled = true; // webcam mode only; ignored for the cube source
+let mirrorEnabled = true; // webcam mode only; ignored for the shape source
 // Normalized (0..1) crop rect within the webcam's *raw* frame that maps onto
 // the RENDER_W x RENDER_H (4:3) sample grid -- see cropWebcamFrame(). Stays
-// at the full-frame identity (0,0,1,1) for the cube source, which is already
+// at the full-frame identity (0,0,1,1) for the shape source, which is already
 // rendered at exactly 4:3 so it needs no cropping. Recomputed every frame
 // webcam is active (cheap, and robust to the user swapping to a
 // different-aspect camera mid-session); updateBackgroundMask() reads it too,
@@ -254,11 +283,95 @@ const harlequinColors = [
 const cubeMats = harlequinColors.map(color =>
   new THREE.MeshStandardMaterial({ color, roughness: 0.5 })
 );
-const cube = new THREE.Mesh(
-  new THREE.BoxGeometry(1.4, 1.4, 1.4),
-  cubeMats
-);
-scene.add(cube);
+
+// Hand-rolled checker texture (no external image asset) so the sphere's
+// rotation is actually visible. A plain color or MeshNormalMaterial is
+// rotationally symmetric on a sphere -- the set of normals visible from a
+// fixed camera is identical no matter how it spins around its own center,
+// so it would look completely static regardless of rotation speed. Painted
+// wedges break that symmetry, the same way a beach ball visibly spins but
+// a plain ball doesn't.
+function makeCheckerTexture(){
+  const cols = 8, rows = 4;
+  const cellPx = 32;
+  const cvs = document.createElement('canvas');
+  cvs.width = cols * cellPx;
+  cvs.height = rows * cellPx;
+  const cctx = cvs.getContext('2d');
+  const colors = [0xff0033, 0x00ffcc, 0xffee00, 0x9900ff, 0x00ff00, 0xff6600];
+  for (let ry = 0; ry < rows; ry++){
+    for (let rx = 0; rx < cols; rx++){
+      cctx.fillStyle = '#' + colors[(rx + ry * cols) % colors.length].toString(16).padStart(6, '0');
+      cctx.fillRect(rx * cellPx, ry * cellPx, cellPx, cellPx);
+    }
+  }
+  const tex = new THREE.CanvasTexture(cvs);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// A small fixed set of primitive geometry/material pairs, built once and
+// swapped onto the single `shape` mesh below rather than disposed and
+// recreated per switch -- cheap low-poly primitives, no real memory
+// concern keeping all four around for the session.
+const SHAPES = {
+  cube: {
+    geometry: new THREE.BoxGeometry(1.4, 1.4, 1.4),
+    material: cubeMats // one material per face, via BoxGeometry's 6 default groups
+  },
+  sphere: {
+    geometry: new THREE.SphereGeometry(1, 32, 24),
+    material: new THREE.MeshStandardMaterial({ map: makeCheckerTexture(), roughness: 0.5 })
+  },
+  cone: {
+    // openEnded:false (default) generates the bottom cap, BUT: three.js
+    // hardcodes cap material index to 1 for the top cap and 2 for the
+    // bottom cap -- unconditionally, even when (as here, radiusTop=0) the
+    // top cap itself is skipped entirely and never generated. A 2-entry
+    // material array leaves the bottom cap's group pointing at index 2,
+    // which doesn't exist, and it silently fails to render. Index 1 is
+    // genuinely never read for a cone, but it's included (matching index 2)
+    // so the array isn't relying on that undocumented detail to stay correct.
+    geometry: new THREE.ConeGeometry(1, 1.8, 32),
+    material: (() => {
+      const side = new THREE.MeshStandardMaterial({ color: 0xff6600, roughness: 0.5 });
+      const cap = new THREE.MeshStandardMaterial({ color: 0x9900ff, roughness: 0.5 });
+      return [side, cap, cap];
+    })()
+  },
+  pyramid: {
+    // radialSegments:4 turns the same cone geometry into a square pyramid;
+    // rotated 45° so a flat face reads towards camera instead of an edge.
+    // Same cap material-index note as the cone above.
+    geometry: new THREE.ConeGeometry(1.1, 1.8, 4).rotateY(Math.PI / 4),
+    material: (() => {
+      const side = new THREE.MeshStandardMaterial({ color: 0x00ffcc, roughness: 0.5 });
+      const base = new THREE.MeshStandardMaterial({ color: 0xffee00, roughness: 0.5 });
+      return [side, base, base];
+    })()
+  }
+};
+const shape = new THREE.Mesh(SHAPES.cube.geometry, SHAPES.cube.material);
+scene.add(shape);
+let currentShapeName = 'cube';
+function setShape(name){
+  if (!SHAPES[name] || name === currentShapeName) return;
+  shape.geometry = SHAPES[name].geometry;
+  shape.material = SHAPES[name].material;
+  currentShapeName = name;
+}
+const shapeButtons = {
+  cube: document.getElementById('shapeCube'),
+  sphere: document.getElementById('shapeSphere'),
+  cone: document.getElementById('shapeCone'),
+  pyramid: document.getElementById('shapePyramid')
+};
+Object.entries(shapeButtons).forEach(([name, btn]) => {
+  btn.addEventListener('click', () => {
+    setShape(name);
+    Object.entries(shapeButtons).forEach(([key, b]) => b.setAttribute('aria-pressed', String(key === name)));
+  });
+});
 const sampleCanvas = document.createElement('canvas');
 sampleCanvas.width = RENDER_W;
 sampleCanvas.height = RENDER_H;
@@ -767,8 +880,8 @@ function renderToAscii(){
 function tick(){
   if (!paused) {
     if (!webcamActive) {
-      cube.rotation.x += 0.01;
-      cube.rotation.y += 0.015;
+      shape.rotation.x += 0.01;
+      shape.rotation.y += 0.015;
       renderer.render(scene, camera);
     }
     renderToAscii();
