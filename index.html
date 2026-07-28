@@ -86,7 +86,7 @@
     padding: 2px 6px;
     width: 110px;
   }
-  #panel button {
+  #panel button, #mobileActionBar button {
     background: #0b0906;
     color: #f7f7f7;
     border: 1px solid #555;
@@ -103,23 +103,26 @@
     display: flex;
     gap: 8px;
   }
-  #panel button.icon-btn {
+  #panel button.icon-btn, #mobileActionBar button.icon-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     padding: 6px;
     line-height: 0;
   }
-  #panel button.icon-btn svg {
+  #panel button.icon-btn svg, #mobileActionBar button.icon-btn svg {
     display: block;
   }
-  #panel button[aria-pressed="true"] {
+  #panel button[aria-pressed="true"], #mobileActionBar button[aria-pressed="true"] {
     background: #2a3320;
     border-color: #7a9a5a;
   }
-  #panel button:disabled {
+  #panel button:disabled, #mobileActionBar button:disabled {
     opacity: 0.4;
     cursor: not-allowed;
+  }
+  #mobileActionBar {
+    display: none; /* only shown on mobile -- see media query below */
   }
   #toast {
     position: fixed;
@@ -218,17 +221,17 @@
       width: 20px;
       height: 20px;
     }
-    #panel button {
+    #panel button, #mobileActionBar button {
       font-size: 15px;
       padding: 10px 14px;
     }
     #toolRow, #shapeRow {
       gap: 12px;
     }
-    #panel button.icon-btn {
+    #panel button.icon-btn, #mobileActionBar button.icon-btn {
       padding: 12px;
     }
-    #panel button.icon-btn svg {
+    #panel button.icon-btn svg, #mobileActionBar button.icon-btn svg {
       width: 22px;
       height: 22px;
     }
@@ -238,6 +241,23 @@
       bottom: 12px;
       max-width: none;
       font-size: 14px;
+    }
+    /* Always-visible bottom bar for pause/screenshot: these two live outside
+       #panel (see markup) specifically so they stay reachable without opening
+       the hamburger drawer, and aren't affected by #panel's off-canvas
+       translateX(-100%) transform above. */
+    #mobileActionBar {
+      display: flex;
+      position: fixed;
+      bottom: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      gap: 10px;
+      padding: 8px 10px;
+      z-index: 11; /* above #backdrop (9) and #panel (10), stays tappable while the drawer is open */
+      background: rgba(11, 9, 6, 0.7);
+      border: 1px solid #333;
+      border-radius: 6px;
     }
   }
 </style>
@@ -310,20 +330,23 @@
         <path d="M8 7L4 12l4 5"/>
       </svg>
     </button>
-    <button id="pauseToggle" class="icon-btn" title="Pause" aria-label="Pause" aria-pressed="false">
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-        <rect x="6" y="4" width="4" height="16" rx="1"/>
-        <rect x="14" y="4" width="4" height="16" rx="1"/>
-      </svg>
-    </button>
-    <button id="screenshotBtn" class="icon-btn" title="Screenshot" aria-label="Screenshot">
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M4 8h3l2-2h6l2 2h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/>
-        <circle cx="12" cy="14" r="3.5"/>
-      </svg>
-    </button>
   </div>
   <button id="copyBtn">Copy Text</button>
+</div>
+
+<div id="mobileActionBar">
+  <button id="pauseToggle" class="icon-btn" title="Pause" aria-label="Pause" aria-pressed="false">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+      <rect x="6" y="4" width="4" height="16" rx="1"/>
+      <rect x="14" y="4" width="4" height="16" rx="1"/>
+    </svg>
+  </button>
+  <button id="screenshotBtn" class="icon-btn" title="Screenshot" aria-label="Screenshot">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 8h3l2-2h6l2 2h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/>
+      <circle cx="12" cy="14" r="3.5"/>
+    </svg>
+  </button>
 </div>
 
 <div id="toast" role="alert" aria-live="assertive"></div>
