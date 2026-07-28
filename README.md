@@ -22,6 +22,10 @@ Webcam mode requires HTTPS or `localhost`. Browsers block camera access over pla
 
 This is a fully static site. Everything, including the ML background removal, runs client side in the visitor's browser; nothing here needs a backend or database. It can be deployed to Render, GitHub Pages, Netlify, or any static host with no build step. three.js and MediaPipe both load from a CDN at runtime, so serving the file is all a host needs to do.
 
+## Privacy
+
+Everything happens locally in your browser. The webcam feed, the segmentation mask, and every rendered frame stay on your device and are never uploaded, streamed, or logged anywhere; there's no backend to send them to. The only network requests are the initial load of three.js and (only if you turn on background removal) the MediaPipe runtime and model, both from their respective CDNs. Screenshots and copied text are generated and saved directly in-browser too.
+
 ## Controls
 
 **Resolution.** Slider (40 to 200 columns) controlling how many ASCII columns and rows the scene is rendered at, keeping a stable on screen footprint regardless of density. Lower values render faster and look chunkier; higher values are sharper but slower.
@@ -31,6 +35,12 @@ This is a fully static site. Everything, including the ML background removal, ru
 **Webcam.** Toggle to switch the render source from the spinning cube to your live camera feed.
 
 **Remove Background.** Webcam mode only. Real time person segmentation via MediaPipe, so only you render; the background is treated as empty space.
+
+**Pause.** Freezes the render loop (cube rotation and ascii output) on the current frame. Everything else stays interactive while paused.
+
+**Copy Text.** Copies the current ascii grid to the clipboard as plain text, in any color mode.
+
+**Screenshot.** Downloads the current frame as a PNG.
 
 ## Tech
 
@@ -54,7 +64,6 @@ Things planned but not yet built:
 * Webcam mirroring, since a true (unmirrored) camera view feels backwards for a selfie style feed.
 * Fixing the render target's forced 4:3 aspect against most webcams' native 16:9, which currently means some stretching or letterboxing on the sampled feed.
 * A camera selection control for anyone with more than one available device.
-* Exporting the current frame as an image or a plain text file.
 * Revisiting color mode's performance ceiling with a real shared glyph atlas (one packed canvas, drawn via source rectangles) rather than one `fillText()` call per character; an earlier attempt at a naive per glyph cache made things slower, not faster, so this needs to be done properly or not at all.
 * General mobile and small screen responsiveness, including making the control panel and text bigger on small screens.
 * Custom text mapping.
