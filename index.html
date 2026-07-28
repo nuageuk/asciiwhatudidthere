@@ -86,9 +86,22 @@ scene.add(new THREE.AmbientLight(0xffffff, 0.3));
 const key = new THREE.DirectionalLight(0xffffff, 1.2);
 key.position.set(3, 4, 5);
 scene.add(key);
+// Harlequin per-face colors (BoxGeometry face order: [+x, -x, +y, -y, +z, -z])
+// for visually confirming the grey/color ASCII modes differentiate faces.
+const harlequinColors = [
+  0xff0033, // +x red
+  0x00ffcc, // -x cyan
+  0xffee00, // +y yellow
+  0x9900ff, // -y purple
+  0x00ff00, // +z green
+  0xff6600  // -z orange
+];
+const cubeMats = harlequinColors.map(color =>
+  new THREE.MeshStandardMaterial({ color, roughness: 0.5 })
+);
 const cube = new THREE.Mesh(
   new THREE.BoxGeometry(1.4, 1.4, 1.4),
-  new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 })
+  cubeMats
 );
 scene.add(cube);
 const sampleCanvas = document.createElement('canvas');
