@@ -13,7 +13,7 @@
        print('sha256-' + base64.b64encode(hashlib.sha256(m.group(1)).digest()).decode())" -->
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
-  script-src 'self' 'sha256-Iyi5s5Xrj5xcuD1lVZqyn0cVv1o/t3gVYH/ejJUdcMs=' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net;
+  script-src 'self' 'sha256-bF7it25JbTMozivicF9zQ+y3T663te6Ar2jSXrZ/rLo=' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net;
   worker-src 'self' blob:;
   connect-src 'self' https://cdn.jsdelivr.net https://storage.googleapis.com;
   img-src 'self' data: blob:;
@@ -97,6 +97,9 @@
     <input type="checkbox" id="bgRemoveToggle" disabled>
     <span id="bgRemoveLabelText">Remove Background</span>
   </label>
+  <button id="pauseToggle">Pause</button>
+  <button id="copyBtn">Copy Text</button>
+  <button id="screenshotBtn">Screenshot</button>
 </div>
 
 <video id="webcamVideo" autoplay playsinline muted style="display:none;"></video>
@@ -110,6 +113,11 @@
 (function(){
   const RAMP = " .:-=+*#%@"; // dark -> dense
 let RENDER_W = 120, RENDER_H = 90;
+let paused = false;
+// Plain-text snapshot of whatever's currently on screen, kept up to date every
+// frame in ALL color modes (not just mono) so the Copy button always has
+// something sensible to grab, and so a screenshot taken mid-pause matches it.
+let lastAsciiText = '';
 
 const renderer = new THREE.WebGLRenderer({
   antialias: true,
@@ -542,39 +550,23 @@ function renderToAscii(){
   const img = sctx.getImageData(0, 0, RENDER_W, RENDER_H).data;
   const mode = colorModeSelect.value;
 
-  if (mode === 'mono') {
-    const rows = [];
-    for(let y = 0; y < RENDER_H; y++){
-      let line = '';
-      for(let x = 0; x < RENDER_W; x++){
-        if (isBackgroundCell(x, y)) { line += ' '; continue; }
-        const idx = (y * RENDER_W + x) * 4; // each pixel is 4 bytes: R,G,B,A
-        const rawLum = (0.299*img[idx] + 0.587*img[idx+1] + 0.114*img[idx+2]) / 255;
-        let lum = rawLum;
-        if (webcamActive) {
-          const i = y * RENDER_W + x;
-          smoothedLum[i] = smoothedLum[i] * LUM_SMOOTH_KEEP + rawLum * LUM_SMOOTH_NEW;
-          lum = smoothedLum[i];
-        }
-        line += RAMP[Math.min(RAMP.length - 1, Math.round(lum * (RAMP.length - 1)))];
-      }
-      rows.push(line);
-    }
-    asciiEl.textContent = rows.join('\n');
-    return;
-  }
-
-  // grey/color: draw straight onto a canvas with fillText — no per-frame DOM nodes.
+  // Always draw onto asciiCanvas (even in mono mode, where it stays hidden
+  // behind the <pre>) and always build the plain-text grid. This means
+  // Screenshot and Copy work identically no matter which display mode is
+  // active, instead of only being wired up for one of them.
   // Clear in raw buffer space (transform reset) so it's correct regardless of
   // the scale*dpr transform fitToScreen() left active on the context.
   actx.save();
   actx.setTransform(1, 0, 0, 1, 0, 0);
   actx.clearRect(0, 0, asciiCanvas.width, asciiCanvas.height);
   actx.restore();
+
+  const rows = [];
   for(let y = 0; y < RENDER_H; y++){
+    let line = '';
     for(let x = 0; x < RENDER_W; x++){
-      if (isBackgroundCell(x, y)) continue;
-      const idx = (y * RENDER_W + x) * 4;
+      if (isBackgroundCell(x, y)) { line += ' '; continue; }
+      const idx = (y * RENDER_W + x) * 4; // each pixel is 4 bytes: R,G,B,A
       const r = img[idx], g = img[idx+1], b = img[idx+2];
       const rawLum = (0.299*r + 0.587*g + 0.114*b) / 255;
       let lum = rawLum;
@@ -584,8 +576,11 @@ function renderToAscii(){
         lum = smoothedLum[i];
       }
       const ch = RAMP[Math.min(RAMP.length - 1, Math.round(lum * (RAMP.length - 1)))];
+      line += ch;
       if (ch === ' ') continue;
-      if (mode === 'grey') {
+      if (mode === 'mono') {
+        actx.fillStyle = '#f7f7f7'; // matches #ascii's CSS color
+      } else if (mode === 'grey') {
         const v = Math.round(lum * 255);
         actx.fillStyle = `rgb(${v},${v},${v})`;
       } else {
@@ -593,18 +588,66 @@ function renderToAscii(){
       }
       actx.fillText(ch, x * CELL_W, y * CELL_H);
     }
+    rows.push(line);
   }
+  lastAsciiText = rows.join('\n');
+  if (mode === 'mono') asciiEl.textContent = lastAsciiText;
 }
 function tick(){
-  if (!webcamActive) {
-    cube.rotation.x += 0.01;
-    cube.rotation.y += 0.015;
-    renderer.render(scene, camera);
+  if (!paused) {
+    if (!webcamActive) {
+      cube.rotation.x += 0.01;
+      cube.rotation.y += 0.015;
+      renderer.render(scene, camera);
+    }
+    renderToAscii();
   }
-  renderToAscii();
   requestAnimationFrame(tick);
 }
 requestAnimationFrame(tick);
+
+const pauseToggle = document.getElementById('pauseToggle');
+pauseToggle.addEventListener('click', () => {
+  paused = !paused;
+  pauseToggle.textContent = paused ? 'Resume' : 'Pause';
+});
+
+const copyBtn = document.getElementById('copyBtn');
+copyBtn.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(lastAsciiText);
+    const original = copyBtn.textContent;
+    copyBtn.textContent = 'Copied!';
+    setTimeout(() => { copyBtn.textContent = original; }, 1200);
+  } catch (err) {
+    console.error(err);
+    alert('Could not copy — your browser may be blocking clipboard access.');
+  }
+});
+
+const screenshotBtn = document.getElementById('screenshotBtn');
+screenshotBtn.addEventListener('click', () => {
+  // Composite the (transparent) ascii canvas over an opaque background so the
+  // downloaded PNG matches what's visible on screen instead of having holes.
+  const out = document.createElement('canvas');
+  out.width = asciiCanvas.width;
+  out.height = asciiCanvas.height;
+  const octx = out.getContext('2d');
+  octx.fillStyle = '#0b0906'; // matches body background
+  octx.fillRect(0, 0, out.width, out.height);
+  octx.drawImage(asciiCanvas, 0, 0);
+  out.toBlob((blob) => {
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ascii-${Date.now()}.png`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }, 'image/png');
+});
 })();
 </script>
 
