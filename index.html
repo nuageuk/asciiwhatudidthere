@@ -3,6 +3,24 @@
 <head>
 <meta charset="UTF-8">
 <title>ASCII</title>
+<!-- script-src's hash allow-lists the app's single inline <script> block below
+     (everything lives in this file, so 'self' alone can't cover it, and
+     'unsafe-inline' would defeat the point of having a CSP at all). Verified
+     against a real Chrome run -- if that script's content ever changes, this
+     hash must be recomputed or the app will silently stop executing:
+       python3 -c "import re,hashlib,base64; d=open('index.html','rb').read(); \
+       m=re.search(rb'<script>(.*?)</script>', d, re.S); \
+       print('sha256-' + base64.b64encode(hashlib.sha256(m.group(1)).digest()).decode())" -->
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'self';
+  script-src 'self' 'sha256-Iyi5s5Xrj5xcuD1lVZqyn0cVv1o/t3gVYH/ejJUdcMs=' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net;
+  worker-src 'self' blob:;
+  connect-src 'self' https://cdn.jsdelivr.net https://storage.googleapis.com;
+  img-src 'self' data: blob:;
+  media-src 'self' blob:;
+  style-src 'self' 'unsafe-inline';
+  object-src 'none'; base-uri 'none';
+">
 <style>
   html, body {
     margin: 0; padding: 0; width: 100%; height: 100%;
@@ -85,7 +103,9 @@
 <pre id="ascii"></pre>
 <canvas id="asciiCanvas"></canvas>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"
+        integrity="sha512-vnmn/Qqn6aG0POAc9mIGzjq0IybrvxJXYDafNvp9JSnDGxeF3pbkSqLvf+YGd5ku63pT7sa/jxHn7/d0mU8+tA=="
+        crossorigin="anonymous"></script>
 <script>
 (function(){
   const RAMP = " .:-=+*#%@"; // dark -> dense
@@ -303,16 +323,25 @@ function __diagLogIfDue(){
 }
 // --- end temporary instrumentation ---
 
+// Pinned to 1.0.0 (the current stable npm dist-tag as of writing) instead of
+// @latest -- SRI isn't available for dynamic import(), so a fixed version is
+// the only way to keep this from changing under us; CSP's script-src/connect-src
+// restrict it to jsdelivr regardless.
+const MEDIAPIPE_VERSION = "1.0.0";
+
 async function loadSegmenter(){
   const { FilesetResolver, ImageSegmenter } = await import(
-    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs"
+    `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}/vision_bundle.mjs`
   );
   const vision = await FilesetResolver.forVisionTasks(
-    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+    `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}/wasm`
   );
   return ImageSegmenter.createFromOptions(vision, {
     baseOptions: {
-      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite"
+      // "/1/" is a real versioned path on this bucket (confirmed alongside
+      // "/latest/", same md5 -- both point at the same 2023-05-07 upload),
+      // used here instead of "/latest/" so the model can't change under us.
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/1/selfie_segmenter.tflite"
     },
     runningMode: "VIDEO",
     outputConfidenceMasks: true
