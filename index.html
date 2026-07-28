@@ -8,13 +8,21 @@
      (everything lives in this file, so 'self' alone can't cover it, and
      'unsafe-inline' would defeat the point of having a CSP at all). Verified
      against a real Chrome run -- if that script's content ever changes, this
-     hash must be recomputed or the app will silently stop executing:
+     hash must be recomputed or the app will silently stop executing. Two
+     gotchas the naive version of this command misses: (1) re.search grabs
+     the FIRST <script>...</script>-shaped substring, and this very comment's
+     example command text contains one -- use findall()[-1] to target the
+     real (last) one instead; (2) CSP hash matching normalizes CRLF/CR to LF
+     before hashing the element's source text, so on a CRLF-saved file (like
+     this one) hashing the raw bytes gives the wrong digest -- normalize
+     first:
        python3 -c "import re,hashlib,base64; d=open('index.html','rb').read(); \
-       m=re.search(rb'<script>(.*?)</script>', d, re.S); \
-       print('sha256-' + base64.b64encode(hashlib.sha256(m.group(1)).digest()).decode())" -->
+       m=re.findall(rb'<script>(.*?)</script>', d, re.S)[-1]; \
+       m=m.replace(b'\r\n', b'\n').replace(b'\r', b'\n'); \
+       print('sha256-' + base64.b64encode(hashlib.sha256(m).digest()).decode())" -->
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
-  script-src 'self' 'sha256-r+bi/1GQkPooCcKdpTE+3rDyA29TqnjuKAhzPK/5oxM=' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net;
+  script-src 'self' 'sha256-O4UD9FO+gt3hFYFqp01jUDcGiXWZdmgDI3BJkTUiC40=' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net;
   worker-src 'self' blob:;
   connect-src 'self' https://cdn.jsdelivr.net https://storage.googleapis.com;
   img-src 'self' data: blob:;
@@ -86,7 +94,7 @@
     padding: 2px 6px;
     width: 110px;
   }
-  #panel button, #mobileActionBar button {
+  #panel button, #actionBar button, #screenshotOverlay button {
     background: #0b0906;
     color: #f7f7f7;
     border: 1px solid #555;
@@ -103,26 +111,43 @@
     display: flex;
     gap: 8px;
   }
-  #panel button.icon-btn, #mobileActionBar button.icon-btn {
+  #panel button.icon-btn, #actionBar button.icon-btn, #screenshotOverlay button.icon-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     padding: 6px;
     line-height: 0;
   }
-  #panel button.icon-btn svg, #mobileActionBar button.icon-btn svg {
+  #panel button.icon-btn svg, #actionBar button.icon-btn svg, #screenshotOverlay button.icon-btn svg {
     display: block;
   }
-  #panel button[aria-pressed="true"], #mobileActionBar button[aria-pressed="true"] {
+  #panel button[aria-pressed="true"], #actionBar button[aria-pressed="true"] {
     background: #2a3320;
     border-color: #7a9a5a;
   }
-  #panel button:disabled, #mobileActionBar button:disabled {
+  #panel button:disabled, #actionBar button:disabled {
     opacity: 0.4;
     cursor: not-allowed;
   }
-  #mobileActionBar {
-    display: none; /* only shown on mobile -- see media query below */
+  /* Always-visible bottom bar for pause/screenshot: lives outside #panel
+     (see markup) as a sibling so it isn't affected by #panel's off-canvas
+     translateX(-100%) drawer transform, and stays fixed to the bottom center
+     of the screen at every viewport width -- not just mobile. bottom:80px
+     (rather than a snugger offset) keeps it clear of #toast, which sits
+     lower (bottom:16px desktop / 12px mobile) and can grow tall enough on
+     wrap to otherwise overlap it. */
+  #actionBar {
+    display: flex;
+    position: fixed;
+    bottom: 80px;
+    left: 50%;
+    transform: translateX(-50%);
+    gap: 10px;
+    padding: 8px 10px;
+    z-index: 11; /* above #backdrop (9) and #panel (10), stays tappable while the drawer is open */
+    background: rgba(11, 9, 6, 0.7);
+    border: 1px solid #333;
+    border-radius: 6px;
   }
   #toast {
     position: fixed;
@@ -166,6 +191,50 @@
     inset: 0;
     z-index: 9; /* below #panel and #menuToggle, above the ascii render */
     background: rgba(0, 0, 0, 0.5);
+  }
+  #screenshotOverlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 21; /* above everything else in the stack, including #toast (20) */
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(0, 0, 0, 0.7);
+  }
+  #screenshotOverlay.open {
+    display: flex;
+  }
+  #screenshotOverlayContent {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    max-width: 90vw;
+    max-height: 90vh;
+    padding: 16px;
+    background: rgba(11, 9, 6, 0.9);
+    border: 1px solid #555;
+    border-radius: 6px;
+    color: #f7f7f7;
+    font-family: 'Courier New', monospace;
+  }
+  #screenshotOverlayClose {
+    align-self: flex-end;
+  }
+  #screenshotOverlayImg {
+    display: block;
+    object-fit: contain;
+    max-width: min(85vw, 480px);
+    max-height: 65vh;
+    border: 1px solid #333;
+    border-radius: 4px;
+  }
+  #screenshotOverlayHint {
+    margin: 0;
+    font-size: 13px;
+    text-align: center;
+    opacity: 0.85;
   }
   @media (max-width: 600px) {
     /* Bigger text, bigger tap targets, more breathing room -- the fixed
@@ -221,17 +290,17 @@
       width: 20px;
       height: 20px;
     }
-    #panel button, #mobileActionBar button {
+    #panel button, #actionBar button, #screenshotOverlay button {
       font-size: 15px;
       padding: 10px 14px;
     }
     #toolRow, #shapeRow {
       gap: 12px;
     }
-    #panel button.icon-btn, #mobileActionBar button.icon-btn {
+    #panel button.icon-btn, #actionBar button.icon-btn, #screenshotOverlay button.icon-btn {
       padding: 12px;
     }
-    #panel button.icon-btn svg, #mobileActionBar button.icon-btn svg {
+    #panel button.icon-btn svg, #actionBar button.icon-btn svg, #screenshotOverlay button.icon-btn svg {
       width: 22px;
       height: 22px;
     }
@@ -241,23 +310,6 @@
       bottom: 12px;
       max-width: none;
       font-size: 14px;
-    }
-    /* Always-visible bottom bar for pause/screenshot: these two live outside
-       #panel (see markup) specifically so they stay reachable without opening
-       the hamburger drawer, and aren't affected by #panel's off-canvas
-       translateX(-100%) transform above. */
-    #mobileActionBar {
-      display: flex;
-      position: fixed;
-      bottom: 12px;
-      left: 50%;
-      transform: translateX(-50%);
-      gap: 10px;
-      padding: 8px 10px;
-      z-index: 11; /* above #backdrop (9) and #panel (10), stays tappable while the drawer is open */
-      background: rgba(11, 9, 6, 0.7);
-      border: 1px solid #333;
-      border-radius: 6px;
     }
   }
 </style>
@@ -334,7 +386,7 @@
   <button id="copyBtn">Copy Text</button>
 </div>
 
-<div id="mobileActionBar">
+<div id="actionBar">
   <button id="pauseToggle" class="icon-btn" title="Pause" aria-label="Pause" aria-pressed="false">
     <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
       <rect x="6" y="4" width="4" height="16" rx="1"/>
@@ -350,6 +402,18 @@
 </div>
 
 <div id="toast" role="alert" aria-live="assertive"></div>
+
+<div id="screenshotOverlay">
+  <div id="screenshotOverlayContent">
+    <button id="screenshotOverlayClose" class="icon-btn" title="Close" aria-label="Close">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 6l12 12M18 6L6 18"/>
+      </svg>
+    </button>
+    <img id="screenshotOverlayImg" alt="ASCII screenshot">
+    <p id="screenshotOverlayHint">Press and hold the image to save it</p>
+  </div>
+</div>
 
 <video id="webcamVideo" autoplay playsinline muted style="display:none;"></video>
 <pre id="ascii"></pre>
@@ -1067,10 +1131,44 @@ copyBtn.addEventListener('click', async () => {
   }
 });
 
+// Mobile has no anchor-download flow worth using -- iOS Safari and Android
+// Chrome both ignore <a download> for same-origin blob URLs and just
+// navigate to the image instead. Long-press-to-save on a plain <img> is a
+// native gesture on both, so mobile gets an overlay showing the PNG instead
+// of triggering a download.
+const screenshotOverlay = document.getElementById('screenshotOverlay');
+const screenshotOverlayImg = document.getElementById('screenshotOverlayImg');
+const screenshotOverlayClose = document.getElementById('screenshotOverlayClose');
+let screenshotOverlayUrl = null;
+
+function closeScreenshotOverlay(){
+  screenshotOverlay.classList.remove('open');
+  if (screenshotOverlayUrl) {
+    URL.revokeObjectURL(screenshotOverlayUrl);
+    screenshotOverlayUrl = null;
+  }
+  screenshotOverlayImg.src = '';
+}
+
+function openScreenshotOverlay(blob){
+  closeScreenshotOverlay(); // in case one's already open, revoke its URL before making a new one
+  screenshotOverlayUrl = URL.createObjectURL(blob);
+  screenshotOverlayImg.src = screenshotOverlayUrl;
+  screenshotOverlay.classList.add('open');
+}
+
+screenshotOverlayClose.addEventListener('click', closeScreenshotOverlay);
+screenshotOverlay.addEventListener('click', (e) => {
+  if (e.target === screenshotOverlay) closeScreenshotOverlay(); // backdrop tap, not the content box
+});
+
 const screenshotBtn = document.getElementById('screenshotBtn');
 screenshotBtn.addEventListener('click', () => {
+  // Checked at click time (not cached) since orientation/resize can change
+  // which flow applies between one press and the next.
+  const isMobile = window.matchMedia('(max-width: 600px)').matches;
   // Composite the (transparent) ascii canvas over an opaque background so the
-  // downloaded PNG matches what's visible on screen instead of having holes.
+  // resulting PNG matches what's visible on screen instead of having holes.
   const out = document.createElement('canvas');
   out.width = asciiCanvas.width;
   out.height = asciiCanvas.height;
@@ -1080,6 +1178,10 @@ screenshotBtn.addEventListener('click', () => {
   octx.drawImage(asciiCanvas, 0, 0);
   out.toBlob((blob) => {
     if (!blob) return;
+    if (isMobile) {
+      openScreenshotOverlay(blob);
+      return;
+    }
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
