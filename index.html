@@ -13,7 +13,7 @@
        print('sha256-' + base64.b64encode(hashlib.sha256(m.group(1)).digest()).decode())" -->
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
-  script-src 'self' 'sha256-kocM0jXal3vg0fweXQR4mKGXvFEfWLkeID+884Kjdbo=' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net;
+  script-src 'self' 'sha256-/u0CnOND4kjg7YLgj92am0yoRffZEI2on341/zn8BnU=' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net;
   worker-src 'self' blob:;
   connect-src 'self' https://cdn.jsdelivr.net https://storage.googleapis.com;
   img-src 'self' data: blob:;
@@ -190,6 +190,10 @@ let mirrorEnabled = true; // webcam mode only; ignored for the cube source
 // so the segmentation mask (sampled from the same *raw* frame) stays aligned
 // with the cropped color image instead of drifting out of registration.
 let cropXNorm = 0, cropYNorm = 0, cropWNorm = 1, cropHNorm = 1;
+// Set by resizeRenderTarget(); makes the next renderToAscii() frame skip EMA
+// blending in both smoothing sites below and use the raw value directly.
+// Cleared at the end of that same frame -- see renderToAscii().
+let justResized = false;
 // Plain-text snapshot of whatever's currently on screen, kept up to date every
 // frame in ALL color modes (not just mono) so the Copy button always has
 // something sensible to grab, and so a screenshot taken mid-pause matches it.
@@ -373,6 +377,12 @@ function resizeRenderTarget(cols){
   personState = new Uint8Array(RENDER_W * RENDER_H);
   despeckledPerson = new Uint8Array(RENDER_W * RENDER_H);
   smoothedLum = new Float32Array(RENDER_W * RENDER_H);
+  // See justResized below: the very next frame skips EMA blending entirely
+  // and snaps straight to the freshly-computed value, instead of easing up
+  // from these zero-filled arrays over several frames (which read as a
+  // flicker to black) or carrying the old resolution's shape forward
+  // stretched onto the new grid (which reads as a brief warp instead).
+  justResized = true;
   fitToScreen();
 }
 resSlider.addEventListener('input', () => resizeRenderTarget(parseInt(resSlider.value, 10)));
@@ -596,7 +606,7 @@ function updateBackgroundMask(){
       const rawMaskValue = top + (bottom - top) * ty;
 
       const i = y * RENDER_W + x;
-      smoothedMask[i] = smoothedMask[i] * MASK_SMOOTH_KEEP + rawMaskValue * MASK_SMOOTH_NEW;
+      smoothedMask[i] = justResized ? rawMaskValue : (smoothedMask[i] * MASK_SMOOTH_KEEP + rawMaskValue * MASK_SMOOTH_NEW);
       if (personState[i] === 0 && smoothedMask[i] > MASK_ON_THRESHOLD) personState[i] = 1;
       else if (personState[i] === 1 && smoothedMask[i] < MASK_OFF_THRESHOLD) personState[i] = 0;
     }
@@ -694,7 +704,7 @@ function renderToAscii(){
       let lum = rawLum;
       if (webcamActive) {
         const i = y * RENDER_W + sx;
-        smoothedLum[i] = smoothedLum[i] * LUM_SMOOTH_KEEP + rawLum * LUM_SMOOTH_NEW;
+        smoothedLum[i] = justResized ? rawLum : (smoothedLum[i] * LUM_SMOOTH_KEEP + rawLum * LUM_SMOOTH_NEW);
         lum = smoothedLum[i];
       }
       const ch = RAMP[Math.min(RAMP.length - 1, Math.round(lum * (RAMP.length - 1)))];
@@ -714,6 +724,7 @@ function renderToAscii(){
   }
   lastAsciiText = rows.join('\n');
   if (mode === 'mono') asciiEl.textContent = lastAsciiText;
+  justResized = false;
 }
 function tick(){
   if (!paused) {
