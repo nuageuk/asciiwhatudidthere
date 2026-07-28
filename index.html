@@ -26,6 +26,7 @@
     position: fixed;
     top: 12px;
     left: 12px;
+    z-index: 10;
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -49,6 +50,16 @@
     font-family: 'Courier New', monospace;
     font-size: 12px;
   }
+  #panel button {
+    background: #0b0906;
+    color: #f7f7f7;
+    border: 1px solid #555;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    padding: 4px 8px;
+    cursor: pointer;
+  }
 </style>
 </head>
 <body>
@@ -60,8 +71,10 @@
     <option value="grey">Grey</option>
     <option value="color">Color</option>
   </select></label>
+  <button id="webcamToggle">Start Webcam</button>
 </div>
 
+<video id="webcamVideo" autoplay playsinline muted style="display:none;"></video>
 <pre id="ascii"></pre>
 <canvas id="asciiCanvas"></canvas>
 
@@ -180,9 +193,41 @@ function resizeRenderTarget(cols){
 }
 resSlider.addEventListener('input', () => resizeRenderTarget(parseInt(resSlider.value, 10)));
 
+const webcamVideo = document.getElementById('webcamVideo');
+const webcamToggle = document.getElementById('webcamToggle');
+let webcamActive = false;
+
+async function startWebcam(){
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+    webcamVideo.srcObject = stream;
+    await webcamVideo.play();
+    webcamActive = true;
+    webcamToggle.textContent = 'Stop Webcam';
+  } catch (err) {
+    console.error(err);
+    alert('Could not access webcam — check browser permissions.');
+  }
+}
+
+function stopWebcam(){
+  const stream = webcamVideo.srcObject;
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  webcamVideo.srcObject = null;
+  webcamActive = false;
+  webcamToggle.textContent = 'Start Webcam';
+}
+
+webcamToggle.addEventListener('click', () => {
+  if (webcamActive) stopWebcam(); else startWebcam();
+});
+
 function renderToAscii(){
-  // copy the WebGL canvas into a normal 2D canvas so we can read its pixels
-  sctx.drawImage(renderer.domElement, 0, 0);
+  // copy either the WebGL canvas or the webcam feed into a normal 2D canvas
+  // so we can read its pixels; destination size always forces it to fill
+  // the RENDER_W x RENDER_H sample grid regardless of the source's own size.
+  const source = webcamActive ? webcamVideo : renderer.domElement;
+  sctx.drawImage(source, 0, 0, RENDER_W, RENDER_H);
   const img = sctx.getImageData(0, 0, RENDER_W, RENDER_H).data;
   const mode = colorModeSelect.value;
 
@@ -226,9 +271,11 @@ function renderToAscii(){
   }
 }
 function tick(){
-  cube.rotation.x += 0.01;
-  cube.rotation.y += 0.015;
-  renderer.render(scene, camera);
+  if (!webcamActive) {
+    cube.rotation.x += 0.01;
+    cube.rotation.y += 0.015;
+    renderer.render(scene, camera);
+  }
   renderToAscii();
   requestAnimationFrame(tick);
 }
