@@ -67,7 +67,6 @@ Color mode is capped by real per character canvas draw cost. Very high resolutio
 Things planned but not yet built:
 
 * `.obj` model upload, parsed from scratch, rendered through the same ASCII pipeline as text and webcam.
-* A camera selection control for anyone with more than one available device.
 * Revisiting color mode's performance ceiling with a real shared glyph atlas (one packed canvas, drawn via source rectangles) rather than one `fillText()` call per character; an earlier attempt at a naive per glyph cache made things slower, not faster, so this needs to be done properly or not at all.
 * General mobile and small screen responsiveness, including making the control panel and text bigger on small screens.
 * Further performance fixes and smoothing.
