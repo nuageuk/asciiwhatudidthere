@@ -4,6 +4,10 @@ A single file, from scratch project that renders live video and 3D as ASCII text
 
 A source (a hidden three.js scene or your webcam feed) is drawn to an off screen canvas each frame, sampled pixel by pixel, and mapped to a density ramp of ASCII characters (the ramp is ` .:-=+*#%@`, darkest to densest) to produce a live text mode render.
 
+## Live demo
+
+[nuageuk.github.io/asciiwhatudidthere](https://nuageuk.github.io/asciiwhatudidthere/)
+
 ## Running it
 
 Open `index.html` directly in a browser, or serve the directory with any static file server:
@@ -52,7 +56,7 @@ Things planned but not yet built:
 * A camera selection control for anyone with more than one available device.
 * Exporting the current frame as an image or a plain text file.
 * Revisiting color mode's performance ceiling with a real shared glyph atlas (one packed canvas, drawn via source rectangles) rather than one `fillText()` call per character; an earlier attempt at a naive per glyph cache made things slower, not faster, so this needs to be done properly or not at all.
-* General mobile and small screen responsiveness.
+* General mobile and small screen responsiveness, including making the control panel and text bigger on small screens.
 * Custom text mapping.
 * Further performance fixes and smoothing.
 * Different character maps (for example, emoji).
