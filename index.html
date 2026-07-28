@@ -16,6 +16,9 @@
     font-size: 8px;
     line-height: 8px;
   }
+  #ascii, #asciiCanvas {
+    transform-origin: center center;
+  }
   #asciiCanvas {
     display: none;
   }
@@ -113,6 +116,25 @@ function resizeAsciiCanvas(){
 }
 resizeAsciiCanvas();
 
+// Keeps the on-screen footprint constant as resolution changes: more/fewer
+// columns changes the output's natural (unscaled) pixel size, so we scale it
+// to fit the viewport every time that natural size changes. Natural size is
+// read from intrinsic properties (cols/rows * cell metrics, canvas.width/
+// height) rather than getBoundingClientRect(), which would reflect an
+// already-applied transform instead of the true unscaled layout size.
+function fitToScreen(){
+  const naturalW = RENDER_W * CELL_W;
+  const naturalH = RENDER_H * CELL_H;
+  const margin = 0.9;
+  const scale = Math.min(
+    (window.innerWidth * margin) / naturalW,
+    (window.innerHeight * margin) / naturalH
+  );
+  asciiEl.style.transform = `scale(${scale})`;
+  asciiCanvas.style.transform = `scale(${scale})`;
+}
+window.addEventListener('resize', fitToScreen);
+
 function setDisplayMode(mode){
   const isMono = mode === 'mono';
   asciiEl.style.display = isMono ? '' : 'none';
@@ -131,8 +153,10 @@ function resizeRenderTarget(cols){
   sampleCanvas.width = RENDER_W;
   sampleCanvas.height = RENDER_H;
   resizeAsciiCanvas();
+  fitToScreen();
 }
 resSlider.addEventListener('input', () => resizeRenderTarget(parseInt(resSlider.value, 10)));
+fitToScreen();
 
 function renderToAscii(){
   // copy the WebGL canvas into a normal 2D canvas so we can read its pixels
