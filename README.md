@@ -70,3 +70,4 @@ Things planned but not yet built:
 * Revisiting color mode's performance ceiling with a real shared glyph atlas (one packed canvas, drawn via source rectangles) rather than one `fillText()` call per character; an earlier attempt at a naive per glyph cache made things slower, not faster, so this needs to be done properly or not at all.
 * General mobile and small screen responsiveness, including making the control panel and text bigger on small screens.
 * Further performance fixes and smoothing.
+* Recording output as WebM/MP4 video (via canvas `captureStream()` + `MediaRecorder`, both native, no new dependencies -- the canvas is already redrawn every frame regardless of display mode, so this piggybacks on that). Deliberately not animated GIF, which has no native browser encoder and would need a new library plus a Web Worker.
