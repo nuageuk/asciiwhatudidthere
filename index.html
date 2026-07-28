@@ -13,7 +13,7 @@
        print('sha256-' + base64.b64encode(hashlib.sha256(m.group(1)).digest()).decode())" -->
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
-  script-src 'self' 'sha256-/u0CnOND4kjg7YLgj92am0yoRffZEI2on341/zn8BnU=' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net;
+  script-src 'self' 'sha256-XWBzZbQvva4oEJsovLSAYog909HkrBC1mZ96PosHS2o=' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net;
   worker-src 'self' blob:;
   connect-src 'self' https://cdn.jsdelivr.net https://storage.googleapis.com;
   img-src 'self' data: blob:;
@@ -113,6 +113,29 @@
     opacity: 0.4;
     cursor: not-allowed;
   }
+  #toast {
+    position: fixed;
+    bottom: 16px;
+    left: 12px;
+    z-index: 20;
+    max-width: 320px;
+    padding: 10px 14px;
+    background: rgba(11, 9, 6, 0.9);
+    border: 1px solid #a33;
+    border-radius: 6px;
+    color: #f7f7f7;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    line-height: 1.4;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    pointer-events: none; /* informational only, auto-dismisses -- never blocks clicks underneath */
+  }
+  #toast.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
 </style>
 </head>
 <body>
@@ -162,6 +185,8 @@
   </div>
   <button id="copyBtn">Copy Text</button>
 </div>
+
+<div id="toast" role="alert" aria-live="assertive"></div>
 
 <video id="webcamVideo" autoplay playsinline muted style="display:none;"></video>
 <pre id="ascii"></pre>
@@ -241,6 +266,19 @@ const sctx = sampleCanvas.getContext('2d', { willReadFrequently: true });
 const asciiEl = document.getElementById('ascii');
 const colorModeSelect = document.getElementById('colorMode');
 const resSlider = document.getElementById('resSlider');
+
+// Non-blocking replacement for alert(): a native alert() halts JS execution
+// (freezing the render loop) until the person clicks OK, and looks jarring
+// against the rest of the panel's aesthetic. This just shows a message for
+// a few seconds and clears itself -- nothing to dismiss, nothing blocks.
+const toastEl = document.getElementById('toast');
+let toastTimer = null;
+function showToast(message){
+  toastEl.textContent = message;
+  toastEl.classList.add('visible');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove('visible'), 4000);
+}
 
 // Must match #ascii's font-size/line-height in the CSS above so all three
 // modes (pre-based mono, canvas-based grey/color) render at the same size.
@@ -408,7 +446,7 @@ async function startWebcam(){
     setBgRemoveEnabled(true);
   } catch (err) {
     console.error(err);
-    alert('Could not access webcam — check browser permissions.');
+    showToast('Could not access webcam — check browser permissions.');
   }
 }
 
@@ -541,7 +579,7 @@ bgRemoveToggle.addEventListener('change', async () => {
       await ensureSegmenter();
     } catch (err) {
       console.error(err);
-      alert('Could not load the background segmentation model.');
+      showToast('Could not load the background segmentation model.');
       bgRemoveToggle.checked = false;
       bgRemoveLabelText.textContent = 'Remove Background';
       bgRemoveToggle.disabled = !webcamActive;
@@ -757,7 +795,7 @@ copyBtn.addEventListener('click', async () => {
     setTimeout(() => { copyBtn.textContent = original; }, 1200);
   } catch (err) {
     console.error(err);
-    alert('Could not copy — your browser may be blocking clipboard access.');
+    showToast('Could not copy — your browser may be blocking clipboard access.');
   }
 });
 
