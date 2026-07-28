@@ -196,6 +196,11 @@ function resizeRenderTarget(cols){
   // resolutions — only the render buffer's pixel density should change.
   sampleCanvas.width = RENDER_W;
   sampleCanvas.height = RENDER_H;
+  // stale-length arrays would misbehave (wrong indexing) once RENDER_W/H change
+  smoothedMask = new Float32Array(RENDER_W * RENDER_H);
+  personState = new Uint8Array(RENDER_W * RENDER_H);
+  despeckledPerson = new Uint8Array(RENDER_W * RENDER_H);
+  smoothedLum = new Float32Array(RENDER_W * RENDER_H);
   fitToScreen();
 }
 resSlider.addEventListener('input', () => resizeRenderTarget(parseInt(resSlider.value, 10)));
@@ -237,7 +242,23 @@ webcamToggle.addEventListener('click', () => {
 // is otherwise all hand-rolled three.js + canvas). Loaded lazily -- only on
 // the first time the checkbox is checked, not on page load -- since it
 // pulls down a WASM runtime + a real .tflite model from Google's CDN.
-const BG_REMOVE_THRESHOLD = 0.5; // mask confidence below this = background/space
+// Raw per-frame mask confidence flips cells on/off near the decision boundary
+// even on a static scene ("mask jitter"). Smoothed with an exponential
+// moving average, plus hysteresis (different on/off thresholds) so a value
+// hovering near one boundary doesn't oscillate.
+const MASK_SMOOTH_KEEP = 0.75; // EMA weight kept from the previous smoothed value
+const MASK_SMOOTH_NEW = 0.25;  // EMA weight given to this frame's raw mask value
+const MASK_ON_THRESHOLD = 0.7;  // smoothed confidence needed for a cell to become "person"
+const MASK_OFF_THRESHOLD = 0.3; // smoothed confidence a "person" cell must drop below to become background
+const MASK_DESPECKLE_MAJORITY = 5; // of 9 (self + 8 neighbors) "person" votes needed to render as person
+
+// Separate from MASK_SMOOTH_*/smoothedMask above: this smooths per-cell raw
+// luminance (camera sensor noise flips a cell's chosen RAMP character every
+// frame even on a static scene), not segmentation confidence. Independently
+// tunable -- lighter than the mask smoothing since it needs to track real
+// brightness changes (someone moving into frame), not just settle on static.
+const LUM_SMOOTH_KEEP = 0.6; // EMA weight kept from the previous smoothed luminance
+const LUM_SMOOTH_NEW = 0.4;  // EMA weight given to this frame's raw luminance
 
 const bgRemoveToggle = document.getElementById('bgRemoveToggle');
 const bgRemoveLabel = document.getElementById('bgRemoveLabel');
@@ -248,6 +269,39 @@ let segmenterPromise = null;
 let bgRemoveActive = false;
 let latestMask = null; // Float32Array of per-pixel person confidence, 0..1
 let latestMaskW = 0, latestMaskH = 0;
+// Per-ASCII-cell (RENDER_W x RENDER_H, not mask-resolution) smoothing state.
+// Reallocated in resizeRenderTarget() whenever RENDER_W/RENDER_H change.
+let smoothedMask = new Float32Array(RENDER_W * RENDER_H);
+let personState = new Uint8Array(RENDER_W * RENDER_H);
+// Despeckled (3x3-majority-filtered) copy of personState, used for the
+// actual render decision -- see updateBackgroundMask().
+let despeckledPerson = new Uint8Array(RENDER_W * RENDER_H);
+// EMA-smoothed per-cell luminance (webcam source only -- see LUM_SMOOTH_*
+// above). Unrelated to smoothedMask: this smooths raw sensor brightness,
+// not segmentation confidence.
+let smoothedLum = new Float32Array(RENDER_W * RENDER_H);
+
+// --- TEMPORARY diagnostic instrumentation (flicker/lag investigation) ---
+// Answers two questions: (1) does the segmenter callback update latestMask
+// at the same rate as the render loop calls it, or does the render loop
+// burn through several identical-mask frames per real mask update? (2) how
+// stale is the mask relative to "now" at render time? Counts are gathered
+// every event but only printed ~1/sec so the console isn't flooded at 60fps.
+let __diagMaskUpdates = 0, __diagRenderFrames = 0;
+let __diagLastMaskUpdateAt = 0;
+let __diagLastLogAt = 0;
+function __diagLogIfDue(){
+  const now = performance.now();
+  if (now - __diagLastLogAt < 1000) return;
+  console.log(
+    `[bg-diag] mask updates/sec=${__diagMaskUpdates} render frames/sec=${__diagRenderFrames} ` +
+    `mask staleness at render=${(now - __diagLastMaskUpdateAt).toFixed(1)}ms`
+  );
+  __diagMaskUpdates = 0;
+  __diagRenderFrames = 0;
+  __diagLastLogAt = now;
+}
+// --- end temporary instrumentation ---
 
 async function loadSegmenter(){
   const { FilesetResolver, ImageSegmenter } = await import(
@@ -331,19 +385,114 @@ function runSegmentation(){
       latestMask = mask.getAsFloat32Array();
       latestMaskW = mask.width;
       latestMaskH = mask.height;
+      __diagMaskUpdates++;
+      __diagLastMaskUpdateAt = performance.now();
       masks.forEach(m => m.close());
     }
   });
 }
 
-// Maps a RENDER_W x RENDER_H cell to the (differently-sized, e.g. 256x256)
-// segmentation mask -- never assume 1:1 pixel alignment with the mask.
+// Refreshes personState for every cell from the latest mask (bilinear
+// sample + EMA smoothing + hysteresis -- see MASK_SMOOTH_*/MASK_ON_THRESHOLD/
+// MASK_OFF_THRESHOLD above), then despeckles it with a 3x3 majority filter
+// into despeckledPerson, which is what isBackgroundCell() actually reads.
+// Despeckling is a separate full pass (not folded into the per-cell mask
+// update above, and not done in place) because a cell's neighbors must all
+// still hold *this frame's* pre-filter personState when their vote is
+// counted -- filtering in place would let an already-filtered neighbor's
+// result bleed into the next cell's count within the same pass.
+function updateBackgroundMask(){
+  if (!bgRemoveActive || !latestMask) return;
+
+  for(let y = 0; y < RENDER_H; y++){
+    for(let x = 0; x < RENDER_W; x++){
+      // Sample position in mask space, using pixel-center convention so
+      // cell centers map to mask-pixel centers instead of being off by
+      // half a pixel.
+      const fx = (x + 0.5) / RENDER_W * latestMaskW - 0.5;
+      const fy = (y + 0.5) / RENDER_H * latestMaskH - 0.5;
+      const x0 = Math.floor(fx), y0 = Math.floor(fy);
+      const tx = fx - x0, ty = fy - y0;
+      const x0c = Math.min(latestMaskW - 1, Math.max(0, x0));
+      const x1c = Math.min(latestMaskW - 1, Math.max(0, x0 + 1));
+      const y0c = Math.min(latestMaskH - 1, Math.max(0, y0));
+      const y1c = Math.min(latestMaskH - 1, Math.max(0, y0 + 1));
+      const v00 = latestMask[y0c * latestMaskW + x0c];
+      const v10 = latestMask[y0c * latestMaskW + x1c];
+      const v01 = latestMask[y1c * latestMaskW + x0c];
+      const v11 = latestMask[y1c * latestMaskW + x1c];
+      const top = v00 + (v10 - v00) * tx;
+      const bottom = v01 + (v11 - v01) * tx;
+      const rawMaskValue = top + (bottom - top) * ty;
+
+      const i = y * RENDER_W + x;
+      smoothedMask[i] = smoothedMask[i] * MASK_SMOOTH_KEEP + rawMaskValue * MASK_SMOOTH_NEW;
+      if (personState[i] === 0 && smoothedMask[i] > MASK_ON_THRESHOLD) personState[i] = 1;
+      else if (personState[i] === 1 && smoothedMask[i] < MASK_OFF_THRESHOLD) personState[i] = 0;
+    }
+  }
+
+  for(let y = 0; y < RENDER_H; y++){
+    const yPrev = Math.max(0, y - 1), yNext = Math.min(RENDER_H - 1, y + 1);
+    for(let x = 0; x < RENDER_W; x++){
+      const xPrev = Math.max(0, x - 1), xNext = Math.min(RENDER_W - 1, x + 1);
+      let votes = 0;
+      for(let ny = yPrev; ny <= yNext; ny++){
+        const row = ny * RENDER_W;
+        for(let nx = xPrev; nx <= xNext; nx++){
+          votes += personState[row + nx];
+        }
+      }
+      despeckledPerson[y * RENDER_W + x] = votes >= MASK_DESPECKLE_MAJORITY ? 1 : 0;
+    }
+  }
+}
+
 function isBackgroundCell(x, y){
   if (!bgRemoveActive || !latestMask) return false;
-  const mx = Math.min(latestMaskW - 1, Math.floor(x / RENDER_W * latestMaskW));
-  const my = Math.min(latestMaskH - 1, Math.floor(y / RENDER_H * latestMaskH));
-  return latestMask[my * latestMaskW + mx] < BG_REMOVE_THRESHOLD;
+  return despeckledPerson[y * RENDER_W + x] === 0;
 }
+
+// --- TEMPORARY debug overlay: personState (pre-despeckle) vs despeckledPerson ---
+// Wiring trace confirmed updateBackgroundMask() writes personState then
+// despeckledPerson, and isBackgroundCell() reads despeckledPerson -- no
+// local/shadowed buffer gap. So if flicker is unchanged, the two buffers
+// may simply be near-identical frame to frame (majority filter rarely
+// triggers), which this overlay makes visible directly. Press "M" to
+// toggle while background removal is on.
+let __debugMaskOverlay = false;
+window.addEventListener('keydown', (e) => {
+  if (e.key.toLowerCase() !== 'm') return;
+  __debugMaskOverlay = !__debugMaskOverlay;
+  console.log('[bg-diag] mask debug overlay:', __debugMaskOverlay ? 'ON' : 'OFF');
+  if (!__debugMaskOverlay) setDisplayMode(colorModeSelect.value);
+});
+function __drawMaskDebugOverlay(){
+  asciiCanvas.style.display = 'block';
+  asciiEl.style.display = 'none';
+  actx.save();
+  actx.setTransform(1, 0, 0, 1, 0, 0);
+  actx.clearRect(0, 0, asciiCanvas.width, asciiCanvas.height);
+  actx.restore();
+  for(let y = 0; y < RENDER_H; y++){
+    for(let x = 0; x < RENDER_W; x++){
+      const i = y * RENDER_W + x;
+      const raw = personState[i] === 1;
+      const filtered = despeckledPerson[i] === 1;
+      // both background = black, both person = white,
+      // despeckle removed a fleck (raw person, filtered out) = blue,
+      // despeckle added a cell (raw background, filtered in) = red
+      let color;
+      if (raw && filtered) color = '#ffffff';
+      else if (!raw && !filtered) color = '#000000';
+      else if (raw && !filtered) color = '#3366ff';
+      else color = '#ff3333';
+      actx.fillStyle = color;
+      actx.fillRect(x * CELL_W, y * CELL_H, CELL_W, CELL_H);
+    }
+  }
+}
+// --- end temporary debug overlay ---
 
 function renderToAscii(){
   // copy either the WebGL canvas or the webcam feed into a normal 2D canvas
@@ -351,6 +500,15 @@ function renderToAscii(){
   // the RENDER_W x RENDER_H sample grid regardless of the source's own size.
   const source = webcamActive ? webcamVideo : renderer.domElement;
   if (bgRemoveActive && segmenter) runSegmentation();
+  if (bgRemoveActive) {
+    __diagRenderFrames++;
+    __diagLogIfDue();
+  }
+  updateBackgroundMask();
+  if (__debugMaskOverlay && bgRemoveActive && latestMask) {
+    __drawMaskDebugOverlay();
+    return;
+  }
   sctx.drawImage(source, 0, 0, RENDER_W, RENDER_H);
   const img = sctx.getImageData(0, 0, RENDER_W, RENDER_H).data;
   const mode = colorModeSelect.value;
@@ -362,7 +520,13 @@ function renderToAscii(){
       for(let x = 0; x < RENDER_W; x++){
         if (isBackgroundCell(x, y)) { line += ' '; continue; }
         const idx = (y * RENDER_W + x) * 4; // each pixel is 4 bytes: R,G,B,A
-        const lum = (0.299*img[idx] + 0.587*img[idx+1] + 0.114*img[idx+2]) / 255;
+        const rawLum = (0.299*img[idx] + 0.587*img[idx+1] + 0.114*img[idx+2]) / 255;
+        let lum = rawLum;
+        if (webcamActive) {
+          const i = y * RENDER_W + x;
+          smoothedLum[i] = smoothedLum[i] * LUM_SMOOTH_KEEP + rawLum * LUM_SMOOTH_NEW;
+          lum = smoothedLum[i];
+        }
         line += RAMP[Math.min(RAMP.length - 1, Math.round(lum * (RAMP.length - 1)))];
       }
       rows.push(line);
@@ -383,7 +547,13 @@ function renderToAscii(){
       if (isBackgroundCell(x, y)) continue;
       const idx = (y * RENDER_W + x) * 4;
       const r = img[idx], g = img[idx+1], b = img[idx+2];
-      const lum = (0.299*r + 0.587*g + 0.114*b) / 255;
+      const rawLum = (0.299*r + 0.587*g + 0.114*b) / 255;
+      let lum = rawLum;
+      if (webcamActive) {
+        const i = y * RENDER_W + x;
+        smoothedLum[i] = smoothedLum[i] * LUM_SMOOTH_KEEP + rawLum * LUM_SMOOTH_NEW;
+        lum = smoothedLum[i];
+      }
       const ch = RAMP[Math.min(RAMP.length - 1, Math.round(lum * (RAMP.length - 1)))];
       if (ch === ' ') continue;
       if (mode === 'grey') {
