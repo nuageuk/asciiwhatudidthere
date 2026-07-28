@@ -60,6 +60,9 @@
     padding: 4px 8px;
     cursor: pointer;
   }
+  #panel label.disabled {
+    opacity: 0.5;
+  }
 </style>
 </head>
 <body>
@@ -72,6 +75,10 @@
     <option value="color">Color</option>
   </select></label>
   <button id="webcamToggle">Start Webcam</button>
+  <label id="bgRemoveLabel" class="disabled">
+    <input type="checkbox" id="bgRemoveToggle" disabled>
+    <span id="bgRemoveLabelText">Remove Background</span>
+  </label>
 </div>
 
 <video id="webcamVideo" autoplay playsinline muted style="display:none;"></video>
@@ -204,6 +211,7 @@ async function startWebcam(){
     await webcamVideo.play();
     webcamActive = true;
     webcamToggle.textContent = 'Stop Webcam';
+    setBgRemoveEnabled(true);
   } catch (err) {
     console.error(err);
     alert('Could not access webcam — check browser permissions.');
@@ -216,17 +224,133 @@ function stopWebcam(){
   webcamVideo.srcObject = null;
   webcamActive = false;
   webcamToggle.textContent = 'Start Webcam';
+  setBgRemoveEnabled(false);
+  closeSegmenter();
 }
 
 webcamToggle.addEventListener('click', () => {
   if (webcamActive) stopWebcam(); else startWebcam();
 });
 
+// --- Background removal (MediaPipe Tasks Vision: selfie segmentation) ---
+// A genuine external ML dependency, unlike the rest of this project (which
+// is otherwise all hand-rolled three.js + canvas). Loaded lazily -- only on
+// the first time the checkbox is checked, not on page load -- since it
+// pulls down a WASM runtime + a real .tflite model from Google's CDN.
+const BG_REMOVE_THRESHOLD = 0.5; // mask confidence below this = background/space
+
+const bgRemoveToggle = document.getElementById('bgRemoveToggle');
+const bgRemoveLabel = document.getElementById('bgRemoveLabel');
+const bgRemoveLabelText = document.getElementById('bgRemoveLabelText');
+
+let segmenter = null;
+let segmenterPromise = null;
+let bgRemoveActive = false;
+let latestMask = null; // Float32Array of per-pixel person confidence, 0..1
+let latestMaskW = 0, latestMaskH = 0;
+
+async function loadSegmenter(){
+  const { FilesetResolver, ImageSegmenter } = await import(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs"
+  );
+  const vision = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+  );
+  return ImageSegmenter.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite"
+    },
+    runningMode: "VIDEO",
+    outputConfidenceMasks: true
+  });
+}
+
+function ensureSegmenter(){
+  if (segmenter) return Promise.resolve(segmenter);
+  if (!segmenterPromise) {
+    segmenterPromise = loadSegmenter()
+      .then(s => { segmenter = s; return s; })
+      .catch(err => { segmenterPromise = null; throw err; });
+  }
+  return segmenterPromise;
+}
+
+// MediaPipe Tasks objects (segmenter + the masks it returns) hold WASM/GPU
+// resources that aren't garbage-collected automatically -- they must be
+// closed explicitly. Re-loading the model on every "Start Webcam" is the
+// tradeoff of closing it here rather than only on page unload; see report.
+function closeSegmenter(){
+  if (segmenter) {
+    segmenter.close();
+    segmenter = null;
+  }
+  segmenterPromise = null;
+  latestMask = null;
+}
+window.addEventListener('pagehide', closeSegmenter);
+
+function setBgRemoveEnabled(enabled){
+  bgRemoveToggle.disabled = !enabled;
+  bgRemoveLabel.classList.toggle('disabled', !enabled);
+  if (!enabled) {
+    bgRemoveToggle.checked = false;
+    bgRemoveActive = false;
+  }
+}
+
+bgRemoveToggle.addEventListener('change', async () => {
+  if (!bgRemoveToggle.checked) {
+    bgRemoveActive = false;
+    return;
+  }
+  if (!segmenter) {
+    bgRemoveToggle.disabled = true;
+    bgRemoveLabelText.textContent = 'Loading segmentation model…';
+    try {
+      await ensureSegmenter();
+    } catch (err) {
+      console.error(err);
+      alert('Could not load the background segmentation model.');
+      bgRemoveToggle.checked = false;
+      bgRemoveLabelText.textContent = 'Remove Background';
+      bgRemoveToggle.disabled = !webcamActive;
+      return;
+    }
+    bgRemoveLabelText.textContent = 'Remove Background';
+    bgRemoveToggle.disabled = !webcamActive; // webcam may have been stopped while loading
+  }
+  bgRemoveActive = webcamActive;
+});
+
+function runSegmentation(){
+  segmenter.segmentForVideo(webcamVideo, performance.now(), (result) => {
+    const masks = result.confidenceMasks;
+    if (masks && masks.length) {
+      // Selfie segmenter is single-category (person); index 0 is its confidence mask.
+      const mask = masks[0];
+      latestMask = mask.getAsFloat32Array();
+      latestMaskW = mask.width;
+      latestMaskH = mask.height;
+      masks.forEach(m => m.close());
+    }
+  });
+}
+
+// Maps a RENDER_W x RENDER_H cell to the (differently-sized, e.g. 256x256)
+// segmentation mask -- never assume 1:1 pixel alignment with the mask.
+function isBackgroundCell(x, y){
+  if (!bgRemoveActive || !latestMask) return false;
+  const mx = Math.min(latestMaskW - 1, Math.floor(x / RENDER_W * latestMaskW));
+  const my = Math.min(latestMaskH - 1, Math.floor(y / RENDER_H * latestMaskH));
+  return latestMask[my * latestMaskW + mx] < BG_REMOVE_THRESHOLD;
+}
+
 function renderToAscii(){
   // copy either the WebGL canvas or the webcam feed into a normal 2D canvas
   // so we can read its pixels; destination size always forces it to fill
   // the RENDER_W x RENDER_H sample grid regardless of the source's own size.
   const source = webcamActive ? webcamVideo : renderer.domElement;
+  if (bgRemoveActive && segmenter) runSegmentation();
   sctx.drawImage(source, 0, 0, RENDER_W, RENDER_H);
   const img = sctx.getImageData(0, 0, RENDER_W, RENDER_H).data;
   const mode = colorModeSelect.value;
@@ -236,6 +360,7 @@ function renderToAscii(){
     for(let y = 0; y < RENDER_H; y++){
       let line = '';
       for(let x = 0; x < RENDER_W; x++){
+        if (isBackgroundCell(x, y)) { line += ' '; continue; }
         const idx = (y * RENDER_W + x) * 4; // each pixel is 4 bytes: R,G,B,A
         const lum = (0.299*img[idx] + 0.587*img[idx+1] + 0.114*img[idx+2]) / 255;
         line += RAMP[Math.min(RAMP.length - 1, Math.round(lum * (RAMP.length - 1)))];
@@ -255,6 +380,7 @@ function renderToAscii(){
   actx.restore();
   for(let y = 0; y < RENDER_H; y++){
     for(let x = 0; x < RENDER_W; x++){
+      if (isBackgroundCell(x, y)) continue;
       const idx = (y * RENDER_W + x) * 4;
       const r = img[idx], g = img[idx+1], b = img[idx+2];
       const lum = (0.299*r + 0.587*g + 0.114*b) / 255;
