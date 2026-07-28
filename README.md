@@ -40,15 +40,17 @@ Everything happens locally in your browser. The webcam feed, the segmentation ma
 
 **Remove Background.** Webcam mode only. Real time person segmentation via MediaPipe, so only you render; the background is treated as empty space.
 
-**Pause** (icon). Freezes the render loop (cube rotation and ascii output) on the current frame. Everything else stays interactive while paused.
+**Pause** (icon). Freezes the render loop (cube rotation and ascii output) on the current frame. Everything else stays interactive while paused. Lives in the always-visible action bar at the bottom center of the screen, not the settings panel, so it's reachable without opening the sidebar.
 
 **Copy Text.** Copies the current ascii grid to the clipboard as plain text, in any color mode.
 
-**Screenshot** (icon). Downloads the current frame as a PNG.
+**Screenshot** (icon). On desktop, downloads the current frame as a PNG. On mobile (viewport width 600px or narrower), instead of downloading, it shows the frame in an overlay with a "press and hold the image to save it" hint — the native long-press-to-save gesture in iOS Safari and Android Chrome — since mobile browsers route file downloads to the Files app rather than the camera roll. Like Pause, it lives in the bottom-center action bar rather than the settings panel.
 
 ## Tech
 
 Everything lives in `index.html`. three.js (loaded from a CDN) renders the 3D scene; a 2D canvas samples pixels from either that render or the live `<video>` feed. Mono mode writes the result as a `<pre>` of plain text when the active character ramp is plain ASCII, the cheapest option since it creates no per character DOM nodes and relies on the font's own monospace metrics. Grey and color modes always draw directly onto a visible `<canvas>` with `fillText()` per character, sized for the display's actual pixel density to stay crisp — and mono falls back to the same canvas path whenever the ramp contains non-ASCII characters (as with the Circles or Braille presets), since those aren't guaranteed to share Courier New's advance width and a native `<pre>` would drift out of alignment line by line once the browser substitutes a fallback font per glyph.
+
+Pause and Screenshot live in their own `#actionBar`, fixed to the bottom center of the screen at every viewport width, kept separate from the settings sidebar (`#panel`) so they stay reachable without opening it — worth knowing if you're editing layout, since it's a second fixed-position control cluster outside the main panel.
 
 Background removal uses [MediaPipe Tasks Vision](https://ai.google.dev/edge/mediapipe/solutions/vision/image_segmenter), a real ML dependency and not hand rolled like the rest of this, for per frame person segmentation. The raw mask is noisy frame to frame, so it's stabilized with temporal smoothing (an exponential moving average), hysteresis (separate thresholds for a cell turning "on" versus staying "on"), and a spatial despeckle pass (a 3x3 majority filter) before being used.
 
