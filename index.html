@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ASCII</title>
 <!-- script-src's hash allow-lists the app's single inline <script> block below
      (everything lives in this file, so 'self' alone can't cover it, and
@@ -13,7 +14,7 @@
        print('sha256-' + base64.b64encode(hashlib.sha256(m.group(1)).digest()).decode())" -->
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
-  script-src 'self' 'sha256-niaFTKpF+wXLd5myPp7XM3bMfn6O1M5aFeisHzfTr7M=' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net;
+  script-src 'self' 'sha256-r+bi/1GQkPooCcKdpTE+3rDyA29TqnjuKAhzPK/5oxM=' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net;
   worker-src 'self' blob:;
   connect-src 'self' https://cdn.jsdelivr.net https://storage.googleapis.com;
   img-src 'self' data: blob:;
@@ -26,6 +27,13 @@
     margin: 0; padding: 0; width: 100%; height: 100%;
     background: #0b0906;
     display: flex; align-items: center; justify-content: center;
+    /* #ascii is visually shrunk via CSS transform in fitToScreen(), but
+       transform doesn't shrink an element's contribution to scrollable
+       overflow -- its untransformed (often much larger) box size still
+       counts. Without this, the page would become scrollable to fit that
+       full untransformed size, which is exactly wrong for an app that's
+       meant to always fill the viewport exactly and never scroll. */
+    overflow: hidden;
   }
   #ascii {
     color: #f7f7f7;
@@ -136,9 +144,112 @@
     opacity: 1;
     transform: translateY(0);
   }
+  #menuToggle {
+    display: none; /* only shown on mobile -- see media query below */
+    position: fixed;
+    top: 8px;
+    left: 8px;
+    z-index: 12; /* above both #panel (10) and #backdrop (9), stays tappable while the drawer is open */
+    background: rgba(11, 9, 6, 0.85);
+    color: #f7f7f7;
+    border: 1px solid #555;
+    border-radius: 6px;
+    padding: 10px;
+    cursor: pointer;
+  }
+  #backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 9; /* below #panel and #menuToggle, above the ascii render */
+    background: rgba(0, 0, 0, 0.5);
+  }
+  @media (max-width: 600px) {
+    /* Bigger text, bigger tap targets, more breathing room -- the fixed
+       12px/8px sizing above is comfortable with a mouse but too cramped to
+       tap reliably on a touchscreen. Roughly targets the ~44px minimum
+       touch-target size most mobile guidelines recommend. */
+    /* The panel becomes an off-canvas drawer on mobile instead of an
+       always-visible floating overlay: it was either covering too much of
+       the render or too cramped to be worth showing size for size. Hidden
+       off the left edge by default, slid in via #menuToggle. Desktop's
+       always-visible corner panel (the rules above this media query) is
+       untouched. */
+    #panel {
+      top: 0;
+      left: 0;
+      right: auto;
+      width: 82vw;
+      max-width: 320px;
+      height: 100vh;
+      max-height: none;
+      border-radius: 0;
+      border-left: none;
+      transform: translateX(-100%);
+      transition: transform 0.25s ease;
+      overflow-y: auto;
+      font-size: 15px;
+      gap: 14px;
+      padding: 56px 16px 16px; /* top padding clears #menuToggle so it never sits over the first control */
+    }
+    #panel.open {
+      transform: translateX(0);
+    }
+    #menuToggle {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #backdrop.open {
+      display: block;
+    }
+    #panel select,
+    #panel input[type="text"] {
+      font-size: 15px;
+      padding: 8px 10px;
+    }
+    #panel input[type="text"] {
+      width: 140px;
+    }
+    #panel input[type="range"] {
+      height: 28px;
+    }
+    #panel input[type="checkbox"] {
+      width: 20px;
+      height: 20px;
+    }
+    #panel button {
+      font-size: 15px;
+      padding: 10px 14px;
+    }
+    #toolRow, #shapeRow {
+      gap: 12px;
+    }
+    #panel button.icon-btn {
+      padding: 12px;
+    }
+    #panel button.icon-btn svg {
+      width: 22px;
+      height: 22px;
+    }
+    #toast {
+      left: 8px;
+      right: 8px;
+      bottom: 12px;
+      max-width: none;
+      font-size: 14px;
+    }
+  }
 </style>
 </head>
 <body>
+
+<button id="menuToggle" title="Menu" aria-label="Open menu" aria-expanded="false">
+  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 6h18M3 12h18M3 18h18"/>
+  </svg>
+</button>
+<div id="backdrop"></div>
 
 <div id="panel">
   <label>Resolution <input type="range" id="resSlider" min="40" max="200" value="120"></label>
@@ -392,6 +503,27 @@ function showToast(message){
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => toastEl.classList.remove('visible'), 4000);
 }
+
+// Mobile off-canvas drawer: #panel and #menuToggle only take on this
+// slide-in-from-the-left behavior inside the max-width:600px media query
+// (see the CSS) -- outside it these classes/attributes are simply inert,
+// since the desktop rules never reference '.open' at all, so the
+// always-visible corner panel is untouched on larger screens.
+const menuToggle = document.getElementById('menuToggle');
+const panelEl = document.getElementById('panel');
+const backdrop = document.getElementById('backdrop');
+const MENU_ICON = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>';
+const CLOSE_ICON = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+function setMenuOpen(open){
+  panelEl.classList.toggle('open', open);
+  backdrop.classList.toggle('open', open);
+  menuToggle.innerHTML = open ? CLOSE_ICON : MENU_ICON;
+  menuToggle.title = open ? 'Close menu' : 'Menu';
+  menuToggle.setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
+  menuToggle.setAttribute('aria-expanded', String(open));
+}
+menuToggle.addEventListener('click', () => setMenuOpen(!panelEl.classList.contains('open')));
+backdrop.addEventListener('click', () => setMenuOpen(false));
 
 // Must match #ascii's font-size/line-height in the CSS above so all three
 // modes (pre-based mono, canvas-based grey/color) render at the same size.
