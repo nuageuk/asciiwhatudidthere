@@ -16,17 +16,57 @@
     font-size: 8px;
     line-height: 8px;
   }
+  #asciiCanvas {
+    display: none;
+  }
+  #panel {
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 14px;
+    background: rgba(11, 9, 6, 0.7);
+    border: 1px solid #333;
+    border-radius: 6px;
+    color: #f7f7f7;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+  }
+  #panel label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  #panel select {
+    background: #0b0906;
+    color: #f7f7f7;
+    border: 1px solid #555;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+  }
 </style>
 </head>
 <body>
 
+<div id="panel">
+  <label>Resolution <input type="range" id="resSlider" min="40" max="200" value="120"></label>
+  <label>Color <select id="colorMode">
+    <option value="mono">Mono</option>
+    <option value="grey">Grey</option>
+    <option value="color">Color</option>
+  </select></label>
+</div>
+
 <pre id="ascii"></pre>
+<canvas id="asciiCanvas"></canvas>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 (function(){
   const RAMP = " .:-=+*#%@"; // dark -> dense
-const RENDER_W = 120, RENDER_H = 90;
+let RENDER_W = 120, RENDER_H = 90;
 
 const renderer = new THREE.WebGLRenderer({
   antialias: true,
@@ -53,23 +93,86 @@ sampleCanvas.width = RENDER_W;
 sampleCanvas.height = RENDER_H;
 const sctx = sampleCanvas.getContext('2d', { willReadFrequently: true });
 const asciiEl = document.getElementById('ascii');
+const colorModeSelect = document.getElementById('colorMode');
+const resSlider = document.getElementById('resSlider');
+
+// Must match #ascii's font-size/line-height in the CSS above so all three
+// modes (pre-based mono, canvas-based grey/color) render at the same size.
+const FONT_SIZE = 8, CELL_H = 8, FONT = `${FONT_SIZE}px 'Courier New', monospace`;
+const asciiCanvas = document.getElementById('asciiCanvas');
+const actx = asciiCanvas.getContext('2d');
+actx.font = FONT;
+const CELL_W = actx.measureText('M').width; // monospace: any glyph gives the true cell width
+
+function resizeAsciiCanvas(){
+  asciiCanvas.width = RENDER_W * CELL_W;
+  asciiCanvas.height = RENDER_H * CELL_H;
+  // resizing a canvas resets its context state
+  actx.font = FONT;
+  actx.textBaseline = 'top';
+}
+resizeAsciiCanvas();
+
+function setDisplayMode(mode){
+  const isMono = mode === 'mono';
+  asciiEl.style.display = isMono ? '' : 'none';
+  asciiCanvas.style.display = isMono ? 'none' : 'block';
+}
+setDisplayMode(colorModeSelect.value);
+colorModeSelect.addEventListener('change', () => setDisplayMode(colorModeSelect.value));
+
+function resizeRenderTarget(cols){
+  RENDER_W = cols;
+  RENDER_H = Math.round(cols * 3 / 4); // keep ~4:3 aspect
+  renderer.setSize(RENDER_W, RENDER_H);
+  // Camera FOV/aspect is intentionally left untouched: RENDER_W:RENDER_H is
+  // always ~4:3 by construction, so framing must stay fixed across
+  // resolutions — only the render buffer's pixel density should change.
+  sampleCanvas.width = RENDER_W;
+  sampleCanvas.height = RENDER_H;
+  resizeAsciiCanvas();
+}
+resSlider.addEventListener('input', () => resizeRenderTarget(parseInt(resSlider.value, 10)));
 
 function renderToAscii(){
   // copy the WebGL canvas into a normal 2D canvas so we can read its pixels
   sctx.drawImage(renderer.domElement, 0, 0);
   const img = sctx.getImageData(0, 0, RENDER_W, RENDER_H).data;
+  const mode = colorModeSelect.value;
 
-  const rows = [];
-  for(let y = 0; y < RENDER_H; y++){
-    let line = '';
-    for(let x = 0; x < RENDER_W; x++){
-      const idx = (y * RENDER_W + x) * 4; // each pixel is 4 bytes: R,G,B,A
-      const lum = (0.299*img[idx] + 0.587*img[idx+1] + 0.114*img[idx+2]) / 255;
-      line += RAMP[Math.min(RAMP.length - 1, Math.round(lum * (RAMP.length - 1)))];
+  if (mode === 'mono') {
+    const rows = [];
+    for(let y = 0; y < RENDER_H; y++){
+      let line = '';
+      for(let x = 0; x < RENDER_W; x++){
+        const idx = (y * RENDER_W + x) * 4; // each pixel is 4 bytes: R,G,B,A
+        const lum = (0.299*img[idx] + 0.587*img[idx+1] + 0.114*img[idx+2]) / 255;
+        line += RAMP[Math.min(RAMP.length - 1, Math.round(lum * (RAMP.length - 1)))];
+      }
+      rows.push(line);
     }
-    rows.push(line);
+    asciiEl.textContent = rows.join('\n');
+    return;
   }
-  asciiEl.textContent = rows.join('\n');
+
+  // grey/color: draw straight onto a canvas with fillText — no per-frame DOM nodes
+  actx.clearRect(0, 0, asciiCanvas.width, asciiCanvas.height);
+  for(let y = 0; y < RENDER_H; y++){
+    for(let x = 0; x < RENDER_W; x++){
+      const idx = (y * RENDER_W + x) * 4;
+      const r = img[idx], g = img[idx+1], b = img[idx+2];
+      const lum = (0.299*r + 0.587*g + 0.114*b) / 255;
+      const ch = RAMP[Math.min(RAMP.length - 1, Math.round(lum * (RAMP.length - 1)))];
+      if (ch === ' ') continue;
+      if (mode === 'grey') {
+        const v = Math.round(lum * 255);
+        actx.fillStyle = `rgb(${v},${v},${v})`;
+      } else {
+        actx.fillStyle = `rgb(${r},${g},${b})`;
+      }
+      actx.fillText(ch, x * CELL_W, y * CELL_H);
+    }
+  }
 }
 function tick(){
   cube.rotation.x += 0.01;
