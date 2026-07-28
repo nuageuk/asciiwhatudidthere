@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ASCII</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: #0b0906;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #ascii {
+    color: #f7f7f7;
+    white-space: pre;
+    font-family: 'Courier New', monospace;
+    font-size: 8px;
+    line-height: 8px;
+  }
+</style>
+</head>
+<body>
+
+<pre id="ascii"></pre>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function(){
+  const RAMP = " .:-=+*#%@"; // dark -> dense
+const RENDER_W = 120, RENDER_H = 90;
+
+const renderer = new THREE.WebGLRenderer({
+  antialias: true,
+  preserveDrawingBuffer: true   // lets us read pixels back out after rendering
+});
+renderer.setSize(RENDER_W, RENDER_H);
+renderer.setClearColor(0x000000, 1);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, RENDER_W / RENDER_H, 0.1, 100);
+camera.position.set(2, 2, 4);
+camera.lookAt(0, 0, 0);
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+const key = new THREE.DirectionalLight(0xffffff, 1.2);
+key.position.set(3, 4, 5);
+scene.add(key);
+const cube = new THREE.Mesh(
+  new THREE.BoxGeometry(1.4, 1.4, 1.4),
+  new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 })
+);
+scene.add(cube);
+const sampleCanvas = document.createElement('canvas');
+sampleCanvas.width = RENDER_W;
+sampleCanvas.height = RENDER_H;
+const sctx = sampleCanvas.getContext('2d', { willReadFrequently: true });
+const asciiEl = document.getElementById('ascii');
+
+function renderToAscii(){
+  // copy the WebGL canvas into a normal 2D canvas so we can read its pixels
+  sctx.drawImage(renderer.domElement, 0, 0);
+  const img = sctx.getImageData(0, 0, RENDER_W, RENDER_H).data;
+
+  const rows = [];
+  for(let y = 0; y < RENDER_H; y++){
+    let line = '';
+    for(let x = 0; x < RENDER_W; x++){
+      const idx = (y * RENDER_W + x) * 4; // each pixel is 4 bytes: R,G,B,A
+      const lum = (0.299*img[idx] + 0.587*img[idx+1] + 0.114*img[idx+2]) / 255;
+      line += RAMP[Math.min(RAMP.length - 1, Math.round(lum * (RAMP.length - 1)))];
+    }
+    rows.push(line);
+  }
+  asciiEl.textContent = rows.join('\n');
+}
+function tick(){
+  cube.rotation.x += 0.01;
+  cube.rotation.y += 0.015;
+  renderer.render(scene, camera);
+  renderToAscii();
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+})();
+</script>
+
+</body>
+</html>
