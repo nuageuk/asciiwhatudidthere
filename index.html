@@ -107,21 +107,20 @@ const actx = asciiCanvas.getContext('2d');
 actx.font = FONT;
 const CELL_W = actx.measureText('M').width; // monospace: any glyph gives the true cell width
 
-function resizeAsciiCanvas(){
-  asciiCanvas.width = RENDER_W * CELL_W;
-  asciiCanvas.height = RENDER_H * CELL_H;
-  // resizing a canvas resets its context state
-  actx.font = FONT;
-  actx.textBaseline = 'top';
-}
-resizeAsciiCanvas();
-
 // Keeps the on-screen footprint constant as resolution changes: more/fewer
-// columns changes the output's natural (unscaled) pixel size, so we scale it
-// to fit the viewport every time that natural size changes. Natural size is
-// read from intrinsic properties (cols/rows * cell metrics, canvas.width/
-// height) rather than getBoundingClientRect(), which would reflect an
-// already-applied transform instead of the true unscaled layout size.
+// columns changes the output's natural (unscaled) pixel size, so we fit it
+// to the viewport every time that natural size changes. Natural size is
+// computed from intrinsic cell metrics (cols/rows * CELL_W/CELL_H) rather
+// than getBoundingClientRect(), which would reflect an already-applied
+// transform instead of the true unscaled layout size.
+//
+// <pre> (mono) is CSS-transform-scaled: vector text re-rasterizes cleanly
+// at any transform scale. <canvas> (grey/color) must NOT be CSS-scaled --
+// that would stretch an already-rasterized bitmap and blur it. Instead its
+// drawing buffer is sized directly to the target on-screen size times
+// devicePixelRatio, and a matching ctx.scale() bakes the fit into the
+// coordinate space so fillText() calls stay expressed in the same
+// cols/rows * CELL_W/CELL_H units used everywhere else.
 function fitToScreen(){
   const naturalW = RENDER_W * CELL_W;
   const naturalH = RENDER_H * CELL_H;
@@ -131,9 +130,21 @@ function fitToScreen(){
     (window.innerHeight * margin) / naturalH
   );
   asciiEl.style.transform = `scale(${scale})`;
-  asciiCanvas.style.transform = `scale(${scale})`;
+
+  const dpr = window.devicePixelRatio || 1;
+  const dispW = naturalW * scale;
+  const dispH = naturalH * scale;
+  asciiCanvas.style.width = `${dispW}px`;
+  asciiCanvas.style.height = `${dispH}px`;
+  // assigning width/height resets the 2D context state, so re-apply it
+  asciiCanvas.width = Math.round(dispW * dpr);
+  asciiCanvas.height = Math.round(dispH * dpr);
+  actx.font = FONT;
+  actx.textBaseline = 'top';
+  actx.scale(scale * dpr, scale * dpr);
 }
 window.addEventListener('resize', fitToScreen);
+fitToScreen();
 
 function setDisplayMode(mode){
   const isMono = mode === 'mono';
@@ -152,11 +163,9 @@ function resizeRenderTarget(cols){
   // resolutions — only the render buffer's pixel density should change.
   sampleCanvas.width = RENDER_W;
   sampleCanvas.height = RENDER_H;
-  resizeAsciiCanvas();
   fitToScreen();
 }
 resSlider.addEventListener('input', () => resizeRenderTarget(parseInt(resSlider.value, 10)));
-fitToScreen();
 
 function renderToAscii(){
   // copy the WebGL canvas into a normal 2D canvas so we can read its pixels
@@ -179,8 +188,13 @@ function renderToAscii(){
     return;
   }
 
-  // grey/color: draw straight onto a canvas with fillText — no per-frame DOM nodes
+  // grey/color: draw straight onto a canvas with fillText — no per-frame DOM nodes.
+  // Clear in raw buffer space (transform reset) so it's correct regardless of
+  // the scale*dpr transform fitToScreen() left active on the context.
+  actx.save();
+  actx.setTransform(1, 0, 0, 1, 0, 0);
   actx.clearRect(0, 0, asciiCanvas.width, asciiCanvas.height);
+  actx.restore();
   for(let y = 0; y < RENDER_H; y++){
     for(let x = 0; x < RENDER_W; x++){
       const idx = (y * RENDER_W + x) * 4;
