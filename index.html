@@ -13,7 +13,7 @@
        print('sha256-' + base64.b64encode(hashlib.sha256(m.group(1)).digest()).decode())" -->
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
-  script-src 'self' 'sha256-vhLwLtPTwj/5yCkape+8K2xJTsOiIgnY03QgkMTlf7c=' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net;
+  script-src 'self' 'sha256-xCl2bk9v+Sy0MsfTzv8F8F3jWIqubSQYv/YuSaMRHy8=' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net;
   worker-src 'self' blob:;
   connect-src 'self' https://cdn.jsdelivr.net https://storage.googleapis.com;
   img-src 'self' data: blob:;
@@ -68,6 +68,16 @@
     font-family: 'Courier New', monospace;
     font-size: 12px;
   }
+  #panel input[type="text"] {
+    background: #0b0906;
+    color: #f7f7f7;
+    border: 1px solid #555;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    padding: 2px 6px;
+    width: 110px;
+  }
   #panel button {
     background: #0b0906;
     color: #f7f7f7;
@@ -114,6 +124,15 @@
     <option value="grey">Grey</option>
     <option value="color">Color</option>
   </select></label>
+  <label>Chars
+    <input type="text" id="rampInput" value=" .:-=+*#%@" spellcheck="false" autocomplete="off" title="Characters used dark to dense, left to right">
+    <button id="rampResetBtn" class="icon-btn" title="Reset characters to default" aria-label="Reset characters to default">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 12a9 9 0 1 1 3 6.7"/>
+        <path d="M3 17v-5h5"/>
+      </svg>
+    </button>
+  </label>
   <button id="webcamToggle">Start Webcam</button>
   <label id="bgRemoveLabel" class="disabled">
     <input type="checkbox" id="bgRemoveToggle" disabled>
@@ -152,7 +171,7 @@
         crossorigin="anonymous"></script>
 <script>
 (function(){
-  const RAMP = " .:-=+*#%@"; // dark -> dense
+  let RAMP = " .:-=+*#%@"; // dark -> dense; user-customizable via #rampInput
 let RENDER_W = 120, RENDER_H = 90;
 let paused = false;
 let mirrorEnabled = true; // webcam mode only; ignored for the cube source
@@ -267,6 +286,27 @@ function setDisplayMode(mode){
 }
 setDisplayMode(colorModeSelect.value);
 colorModeSelect.addEventListener('change', () => setDisplayMode(colorModeSelect.value));
+
+const DEFAULT_RAMP = RAMP;
+const rampInput = document.getElementById('rampInput');
+const rampResetBtn = document.getElementById('rampResetBtn');
+// Any non-empty string works as a ramp -- RAMP.length-1 stays >= 0 as long
+// as there's at least one character, so a single-char ramp (every cell the
+// same glyph) is valid too, just visually uninteresting. An empty field is
+// the only thing rejected, since it'd divide by zero below; the last valid
+// ramp just stays in effect until the person types something again.
+rampInput.addEventListener('input', () => {
+  if (rampInput.value.length === 0) return;
+  // Space is always the darkest (index 0) character, regardless of what the
+  // person typed, so black areas render as blank instead of a solid glyph.
+  // Prepended rather than shown in the field itself, so it doesn't fight
+  // with what they're typing or move their cursor mid-edit.
+  RAMP = rampInput.value.startsWith(' ') ? rampInput.value : ' ' + rampInput.value;
+});
+rampResetBtn.addEventListener('click', () => {
+  RAMP = DEFAULT_RAMP;
+  rampInput.value = DEFAULT_RAMP;
+});
 
 function resizeRenderTarget(cols){
   RENDER_W = cols;

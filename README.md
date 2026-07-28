@@ -32,6 +32,8 @@ Everything happens locally in your browser. The webcam feed, the segmentation ma
 
 **Color.** Select between rendering modes. `mono` is plain white on black text and is the fastest, using native text layout. `grey` tints each character by its sampled luminance. `color` tints each character with the actual sampled pixel color.
 
+**Chars.** The density ramp used to map brightness to characters, darkest to densest, left to right (default: `` .:-=+*#%@``). Type any string here — your name, emoji, whatever — to remap the whole render onto it. A space is always the darkest character, prepended automatically if you don't type one, so black areas stay blank instead of filling in with a visible glyph. The reset icon restores the default ramp.
+
 **Webcam.** Toggle to switch the render source from the spinning cube to your live camera feed.
 
 **Mirror** (icon, webcam mode only). Flips the feed horizontally for a selfie-style view. On by default. Mirroring happens at the pixel-sampling stage, not with a CSS flip, so ASCII glyphs stay upright and readable instead of rendering backwards.
@@ -68,6 +70,5 @@ Things planned but not yet built:
 * A camera selection control for anyone with more than one available device.
 * Revisiting color mode's performance ceiling with a real shared glyph atlas (one packed canvas, drawn via source rectangles) rather than one `fillText()` call per character; an earlier attempt at a naive per glyph cache made things slower, not faster, so this needs to be done properly or not at all.
 * General mobile and small screen responsiveness, including making the control panel and text bigger on small screens.
-* Custom text mapping.
 * Further performance fixes and smoothing.
 * Different character maps (for example, emoji).
