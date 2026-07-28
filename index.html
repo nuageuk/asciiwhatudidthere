@@ -13,7 +13,7 @@
        print('sha256-' + base64.b64encode(hashlib.sha256(m.group(1)).digest()).decode())" -->
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
-  script-src 'self' 'sha256-bF7it25JbTMozivicF9zQ+y3T663te6Ar2jSXrZ/rLo=' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net;
+  script-src 'self' 'sha256-eq7OeaPwaKY7m+hBams97tcoewj++tZKR319CyKPSJU=' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net;
   worker-src 'self' blob:;
   connect-src 'self' https://cdn.jsdelivr.net https://storage.googleapis.com;
   img-src 'self' data: blob:;
@@ -81,6 +81,28 @@
   #panel label.disabled {
     opacity: 0.5;
   }
+  #toolRow {
+    display: flex;
+    gap: 8px;
+  }
+  #panel button.icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px;
+    line-height: 0;
+  }
+  #panel button.icon-btn svg {
+    display: block;
+  }
+  #panel button[aria-pressed="true"] {
+    background: #2a3320;
+    border-color: #7a9a5a;
+  }
+  #panel button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
 </style>
 </head>
 <body>
@@ -97,9 +119,28 @@
     <input type="checkbox" id="bgRemoveToggle" disabled>
     <span id="bgRemoveLabelText">Remove Background</span>
   </label>
-  <button id="pauseToggle">Pause</button>
+  <div id="toolRow">
+    <button id="mirrorToggle" class="icon-btn" title="Mirror webcam" aria-label="Mirror webcam" aria-pressed="true" disabled>
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3v18"/>
+        <path d="M16 7l4 5-4 5"/>
+        <path d="M8 7L4 12l4 5"/>
+      </svg>
+    </button>
+    <button id="pauseToggle" class="icon-btn" title="Pause" aria-label="Pause" aria-pressed="false">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+        <rect x="6" y="4" width="4" height="16" rx="1"/>
+        <rect x="14" y="4" width="4" height="16" rx="1"/>
+      </svg>
+    </button>
+    <button id="screenshotBtn" class="icon-btn" title="Screenshot" aria-label="Screenshot">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 8h3l2-2h6l2 2h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/>
+        <circle cx="12" cy="14" r="3.5"/>
+      </svg>
+    </button>
+  </div>
   <button id="copyBtn">Copy Text</button>
-  <button id="screenshotBtn">Screenshot</button>
 </div>
 
 <video id="webcamVideo" autoplay playsinline muted style="display:none;"></video>
@@ -114,10 +155,13 @@
   const RAMP = " .:-=+*#%@"; // dark -> dense
 let RENDER_W = 120, RENDER_H = 90;
 let paused = false;
+let mirrorEnabled = true; // webcam mode only; ignored for the cube source
 // Plain-text snapshot of whatever's currently on screen, kept up to date every
 // frame in ALL color modes (not just mono) so the Copy button always has
 // something sensible to grab, and so a screenshot taken mid-pause matches it.
 let lastAsciiText = '';
+const PAUSE_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>';
+const PLAY_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M7 4l13 8-13 8V4z"/></svg>';
 
 const renderer = new THREE.WebGLRenderer({
   antialias: true,
@@ -235,7 +279,13 @@ resSlider.addEventListener('input', () => resizeRenderTarget(parseInt(resSlider.
 
 const webcamVideo = document.getElementById('webcamVideo');
 const webcamToggle = document.getElementById('webcamToggle');
+const mirrorToggle = document.getElementById('mirrorToggle');
 let webcamActive = false;
+
+mirrorToggle.addEventListener('click', () => {
+  mirrorEnabled = !mirrorEnabled;
+  mirrorToggle.setAttribute('aria-pressed', String(mirrorEnabled));
+});
 
 async function startWebcam(){
   try {
@@ -244,6 +294,7 @@ async function startWebcam(){
     await webcamVideo.play();
     webcamActive = true;
     webcamToggle.textContent = 'Stop Webcam';
+    mirrorToggle.disabled = false;
     setBgRemoveEnabled(true);
   } catch (err) {
     console.error(err);
@@ -257,6 +308,7 @@ function stopWebcam(){
   webcamVideo.srcObject = null;
   webcamActive = false;
   webcamToggle.textContent = 'Start Webcam';
+  mirrorToggle.disabled = true;
   setBgRemoveEnabled(false);
   closeSegmenter();
 }
@@ -565,13 +617,19 @@ function renderToAscii(){
   for(let y = 0; y < RENDER_H; y++){
     let line = '';
     for(let x = 0; x < RENDER_W; x++){
-      if (isBackgroundCell(x, y)) { line += ' '; continue; }
-      const idx = (y * RENDER_W + x) * 4; // each pixel is 4 bytes: R,G,B,A
+      // Webcam mode mirrors (when mirrorEnabled) by reading from the flipped source column (sx) but
+      // draw/append at the display column (x). This keeps color sampling,
+      // the background mask, and luminance smoothing all indexed the same
+      // way a plain unmirrored render would be -- only the final on-screen
+      // position flips, so glyphs stay upright and never render backwards.
+      const sx = (webcamActive && mirrorEnabled) ? (RENDER_W - 1 - x) : x;
+      if (isBackgroundCell(sx, y)) { line += ' '; continue; }
+      const idx = (y * RENDER_W + sx) * 4; // each pixel is 4 bytes: R,G,B,A
       const r = img[idx], g = img[idx+1], b = img[idx+2];
       const rawLum = (0.299*r + 0.587*g + 0.114*b) / 255;
       let lum = rawLum;
       if (webcamActive) {
-        const i = y * RENDER_W + x;
+        const i = y * RENDER_W + sx;
         smoothedLum[i] = smoothedLum[i] * LUM_SMOOTH_KEEP + rawLum * LUM_SMOOTH_NEW;
         lum = smoothedLum[i];
       }
@@ -609,7 +667,10 @@ requestAnimationFrame(tick);
 const pauseToggle = document.getElementById('pauseToggle');
 pauseToggle.addEventListener('click', () => {
   paused = !paused;
-  pauseToggle.textContent = paused ? 'Resume' : 'Pause';
+  pauseToggle.setAttribute('aria-pressed', String(paused));
+  pauseToggle.title = paused ? 'Resume' : 'Pause';
+  pauseToggle.setAttribute('aria-label', paused ? 'Resume' : 'Pause');
+  pauseToggle.innerHTML = paused ? PLAY_ICON : PAUSE_ICON;
 });
 
 const copyBtn = document.getElementById('copyBtn');

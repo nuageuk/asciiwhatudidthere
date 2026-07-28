@@ -34,13 +34,15 @@ Everything happens locally in your browser. The webcam feed, the segmentation ma
 
 **Webcam.** Toggle to switch the render source from the spinning cube to your live camera feed.
 
+**Mirror** (icon, webcam mode only). Flips the feed horizontally for a selfie-style view. On by default. Mirroring happens at the pixel-sampling stage, not with a CSS flip, so ASCII glyphs stay upright and readable instead of rendering backwards.
+
 **Remove Background.** Webcam mode only. Real time person segmentation via MediaPipe, so only you render; the background is treated as empty space.
 
-**Pause.** Freezes the render loop (cube rotation and ascii output) on the current frame. Everything else stays interactive while paused.
+**Pause** (icon). Freezes the render loop (cube rotation and ascii output) on the current frame. Everything else stays interactive while paused.
 
 **Copy Text.** Copies the current ascii grid to the clipboard as plain text, in any color mode.
 
-**Screenshot.** Downloads the current frame as a PNG.
+**Screenshot** (icon). Downloads the current frame as a PNG.
 
 ## Tech
 
@@ -61,7 +63,6 @@ Color mode is capped by real per character canvas draw cost. Very high resolutio
 Things planned but not yet built:
 
 * `.obj` model upload, parsed from scratch, rendered through the same ASCII pipeline as text and webcam.
-* Webcam mirroring, since a true (unmirrored) camera view feels backwards for a selfie style feed.
 * Fixing the render target's forced 4:3 aspect against most webcams' native 16:9, which currently means some stretching or letterboxing on the sampled feed.
 * A camera selection control for anyone with more than one available device.
 * Revisiting color mode's performance ceiling with a real shared glyph atlas (one packed canvas, drawn via source rectangles) rather than one `fillText()` call per character; an earlier attempt at a naive per glyph cache made things slower, not faster, so this needs to be done properly or not at all.
