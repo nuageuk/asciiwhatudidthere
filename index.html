@@ -13,7 +13,7 @@
        print('sha256-' + base64.b64encode(hashlib.sha256(m.group(1)).digest()).decode())" -->
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
-  script-src 'self' 'sha256-xCl2bk9v+Sy0MsfTzv8F8F3jWIqubSQYv/YuSaMRHy8=' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net;
+  script-src 'self' 'sha256-v3D4P2JpPU6wzd7TjY8nygY1uiIbm4ZgNup1SCpDWrQ=' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net;
   worker-src 'self' blob:;
   connect-src 'self' https://cdn.jsdelivr.net https://storage.googleapis.com;
   img-src 'self' data: blob:;
@@ -410,28 +410,6 @@ let despeckledPerson = new Uint8Array(RENDER_W * RENDER_H);
 // not segmentation confidence.
 let smoothedLum = new Float32Array(RENDER_W * RENDER_H);
 
-// --- TEMPORARY diagnostic instrumentation (flicker/lag investigation) ---
-// Answers two questions: (1) does the segmenter callback update latestMask
-// at the same rate as the render loop calls it, or does the render loop
-// burn through several identical-mask frames per real mask update? (2) how
-// stale is the mask relative to "now" at render time? Counts are gathered
-// every event but only printed ~1/sec so the console isn't flooded at 60fps.
-let __diagMaskUpdates = 0, __diagRenderFrames = 0;
-let __diagLastMaskUpdateAt = 0;
-let __diagLastLogAt = 0;
-function __diagLogIfDue(){
-  const now = performance.now();
-  if (now - __diagLastLogAt < 1000) return;
-  console.log(
-    `[bg-diag] mask updates/sec=${__diagMaskUpdates} render frames/sec=${__diagRenderFrames} ` +
-    `mask staleness at render=${(now - __diagLastMaskUpdateAt).toFixed(1)}ms`
-  );
-  __diagMaskUpdates = 0;
-  __diagRenderFrames = 0;
-  __diagLastLogAt = now;
-}
-// --- end temporary instrumentation ---
-
 // Pinned to 1.0.0 (the current stable npm dist-tag as of writing) instead of
 // @latest -- SRI isn't available for dynamic import(), so a fixed version is
 // the only way to keep this from changing under us; CSP's script-src/connect-src
@@ -523,8 +501,6 @@ function runSegmentation(){
       latestMask = mask.getAsFloat32Array();
       latestMaskW = mask.width;
       latestMaskH = mask.height;
-      __diagMaskUpdates++;
-      __diagLastMaskUpdateAt = performance.now();
       masks.forEach(m => m.close());
     }
   });
@@ -596,56 +572,11 @@ function isBackgroundCell(x, y){
   return despeckledPerson[y * RENDER_W + x] === 0;
 }
 
-// --- TEMPORARY debug overlay: personState (pre-despeckle) vs despeckledPerson ---
-// Wiring trace confirmed updateBackgroundMask() writes personState then
-// despeckledPerson, and isBackgroundCell() reads despeckledPerson -- no
-// local/shadowed buffer gap. So if flicker is unchanged, the two buffers
-// may simply be near-identical frame to frame (majority filter rarely
-// triggers), which this overlay makes visible directly. Press "M" to
-// toggle while background removal is on.
-let __debugMaskOverlay = false;
-window.addEventListener('keydown', (e) => {
-  if (e.key.toLowerCase() !== 'm') return;
-  __debugMaskOverlay = !__debugMaskOverlay;
-  console.log('[bg-diag] mask debug overlay:', __debugMaskOverlay ? 'ON' : 'OFF');
-  if (!__debugMaskOverlay) setDisplayMode(colorModeSelect.value);
-});
-function __drawMaskDebugOverlay(){
-  asciiCanvas.style.display = 'block';
-  asciiEl.style.display = 'none';
-  actx.save();
-  actx.setTransform(1, 0, 0, 1, 0, 0);
-  actx.clearRect(0, 0, asciiCanvas.width, asciiCanvas.height);
-  actx.restore();
-  for(let y = 0; y < RENDER_H; y++){
-    for(let x = 0; x < RENDER_W; x++){
-      const i = y * RENDER_W + x;
-      const raw = personState[i] === 1;
-      const filtered = despeckledPerson[i] === 1;
-      // both background = black, both person = white,
-      // despeckle removed a fleck (raw person, filtered out) = blue,
-      // despeckle added a cell (raw background, filtered in) = red
-      let color;
-      if (raw && filtered) color = '#ffffff';
-      else if (!raw && !filtered) color = '#000000';
-      else if (raw && !filtered) color = '#3366ff';
-      else color = '#ff3333';
-      actx.fillStyle = color;
-      actx.fillRect(x * CELL_W, y * CELL_H, CELL_W, CELL_H);
-    }
-  }
-}
-// --- end temporary debug overlay ---
-
 function renderToAscii(){
   // copy either the WebGL canvas or the webcam feed into a normal 2D canvas
   // so we can read its pixels; destination size always forces it to fill
   // the RENDER_W x RENDER_H sample grid regardless of the source's own size.
   if (bgRemoveActive && segmenter) runSegmentation();
-  if (bgRemoveActive) {
-    __diagRenderFrames++;
-    __diagLogIfDue();
-  }
   if (webcamActive) {
     const vw = webcamVideo.videoWidth, vh = webcamVideo.videoHeight;
     if (vw && vh) {
@@ -681,10 +612,6 @@ function renderToAscii(){
     sctx.drawImage(renderer.domElement, 0, 0, RENDER_W, RENDER_H);
   }
   updateBackgroundMask();
-  if (__debugMaskOverlay && bgRemoveActive && latestMask) {
-    __drawMaskDebugOverlay();
-    return;
-  }
   const img = sctx.getImageData(0, 0, RENDER_W, RENDER_H).data;
   const mode = colorModeSelect.value;
 
