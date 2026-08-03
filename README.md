@@ -1,8 +1,8 @@
 # asciiwhatudidthere
 
-A single file, from scratch project that renders live video and 3D as ASCII text in the browser. Text, a spinning cube, or your own webcam, all pushed through the same pixel sampling pipeline.
+A single-file, from-scratch project that renders live video and 3D as ASCII text in the browser.  Various sample 3D objects, or your own webcam, all pushed through the same pixel-sampling pipeline.
 
-A source (a hidden three.js scene or your webcam feed) is drawn to an off screen canvas each frame, sampled pixel by pixel, and mapped to a density ramp of ASCII characters (the ramp is ` .:-=+*#%@`, darkest to densest) to produce a live text mode render.
+A source (a hidden three.js scene or your webcam feed) is drawn to an off-screen canvas each frame, sampled pixel by pixel, and mapped to a density ramp of ASCII characters (the ramp is ` .:-=+*#%@`, darkest to densest) to produce a live text mode render.
 
 ## Live demo
 
@@ -20,7 +20,7 @@ Webcam mode requires HTTPS or `localhost`. Browsers block camera access over pla
 
 ## Hosting it
 
-This is a fully static site. Everything, including the ML background removal, runs client side in the visitor's browser; nothing here needs a backend or database. It can be deployed to Render, GitHub Pages, Netlify, or any static host with no build step. three.js and MediaPipe both load from a CDN at runtime, so serving the file is all a host needs to do.
+This is a fully static site. Everything, including the ML background removal, runs client-side in the visitor's browser; nothing here needs a backend or database. It can be deployed to Render, GitHub Pages, Netlify, or any static host with no build step. three.js and MediaPipe both load from a CDN at runtime, so serving the file is all a host needs to do.
 
 ## Privacy
 
@@ -28,7 +28,7 @@ Everything happens locally in your browser. The webcam feed, the segmentation ma
 
 ## Controls
 
-**Resolution.** Slider (40 to 200 columns) controlling how many ASCII columns and rows the scene is rendered at, keeping a stable on screen footprint regardless of density. Lower values render faster and look chunkier; higher values are sharper but slower.
+**Resolution.** Slider (40 to 200 columns) controlling how many ASCII columns and rows the scene is rendered at, keeping a stable on-screen footprint regardless of density. Lower values render faster and look chunkier; higher values are sharper but slower.
 
 **Color.** Select between rendering modes. `mono` is plain white on black text and is the fastest, using native text layout. `grey` tints each character by its sampled luminance. `color` tints each character with the actual sampled pixel color.
 
