@@ -1,5 +1,10 @@
 # asciiwhatudidthere
 
+Hello! :)
+
+<img src="screenshots/hello!.gif" alt="Hello!" width="300">
+
+
 A single-file, from-scratch project that renders live video and 3D as ASCII text in the browser.  Various sample 3D objects, or your own webcam, all pushed through the same pixel-sampling pipeline.
 
 A source (a hidden three.js scene or your webcam feed) is drawn to an off-screen canvas each frame, sampled pixel by pixel, and mapped to a density ramp of ASCII characters (the ramp is ` .:-=+*#%@`, darkest to densest) to produce a live text mode render.
