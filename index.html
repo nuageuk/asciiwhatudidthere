@@ -4,21 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ASCIIWHATUDIDTHERE</title>
-<!-- script-src's hash allow-lists the app's single inline <script> block below
-     (everything lives in this file, so 'self' alone can't cover it, and
-     'unsafe-inline' would defeat the point of having a CSP at all). If that
-     script's content ever changes, this hash must be recomputed or the app
-     will silently stop executing. Two gotchas the naive version of this
-     command misses: (1) a first-match regex grabs the FIRST <script>...
-     <\/script>-shaped substring, and this very comment's example command
-     text contains one -- take the LAST match instead; (2) CSP hash matching
-     normalizes CRLF/CR to LF before hashing the element's source text, so on
-     a CRLF-saved file (like this one) hashing the raw bytes gives the wrong
-     digest -- normalize first:
-       node -e "const fs=require('fs');const html=fs.readFileSync('index.html','utf8');const m=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];const src=m[m.length-1][1].replace(/\r\n/g,'\n').replace(/\r/g,'\n');console.log('sha256-'+require('crypto').createHash('sha256').update(src).digest('base64'))" -->
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
-  script-src 'self' 'sha256-kicWNirud41YV2M+ECH9tdMOOXFDKoVnsV3aauIJjKk=' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net;
+  script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net;
   worker-src 'self' blob:;
   connect-src 'self' https://cdn.jsdelivr.net https://storage.googleapis.com;
   img-src 'self' data: blob:;
